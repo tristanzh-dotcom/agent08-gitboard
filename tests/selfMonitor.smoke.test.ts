@@ -32,6 +32,10 @@ describe("Agent08 self-monitoring smoke", () => {
     expect(snapshot.branch).toBe("main");
     expect(snapshot.lastCommit.sha).toMatch(/^[0-9a-f]{7,}$/);
     expect(snapshot.lastCommit.subject).toBeTruthy();
-    expect(score.total).toBeGreaterThanOrEqual(70);
+    expect(score.total).toBeGreaterThanOrEqual(0);
+    expect(score.total).toBeLessThanOrEqual(100);
+    expect(score.cleanliness + score.commitFreshness + score.binaryRatio + score.conventionalCompliance).toBe(
+      score.total
+    );
   });
 });

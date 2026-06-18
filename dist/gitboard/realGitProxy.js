@@ -1,0 +1,85 @@
+import { execFile } from "node:child_process";
+import { readdir, stat } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
+const ALLOWED_COMMANDS = new Set(["status", "log", "diff", "stash"]);
+const IGNORED_DIRS = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    ".venv",
+    "__pycache__",
+    "coverage",
+    "_archive",
+    "_archive_legacy",
+    ".cache",
+    ".pytest_cache"
+]);
+export class RealGitProxy {
+    async statusPorcelain(repoPath) {
+        return runReadOnlyGit(repoPath, ["status", "--porcelain=v2", "--branch"]);
+    }
+    async lastCommit(repoPath) {
+        return runReadOnlyGit(repoPath, ["log", "-1", "--format=%h|%s|%aI"]);
+    }
+    async diffStat(repoPath) {
+        try {
+            return await runReadOnlyGit(repoPath, ["diff", "--stat", "HEAD"]);
+        }
+        catch (error) {
+            if (error instanceof Error && /bad revision|ambiguous argument/i.test(error.message)) {
+                return "";
+            }
+            throw error;
+        }
+    }
+    async stashList(repoPath) {
+        return runReadOnlyGit(repoPath, ["stash", "list"]);
+    }
+    async listLargeFiles(repoPath, thresholdBytes) {
+        const results = [];
+        await collectLargeFiles(repoPath, repoPath, thresholdBytes, results);
+        return results.sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path));
+    }
+}
+export function assertReadOnlyGitArgs(args) {
+    const [command, subcommand] = args;
+    if (!command || !ALLOWED_COMMANDS.has(command)) {
+        throw new Error(`git command is not read-only: ${args.join(" ")}`);
+    }
+    if (command === "stash" && subcommand !== "list") {
+        throw new Error(`git command is not read-only: ${args.join(" ")}`);
+    }
+    if (args.some((arg) => /^(?:add|commit|push|pull|checkout|reset|clean|rm|mv|apply|pop)$/.test(arg))) {
+        throw new Error(`git command is not read-only: ${args.join(" ")}`);
+    }
+}
+async function runReadOnlyGit(repoPath, args) {
+    assertReadOnlyGitArgs(args);
+    const { stdout } = await execFileAsync("git", args, {
+        cwd: repoPath,
+        timeout: 10_000,
+        maxBuffer: 10 * 1024 * 1024
+    });
+    return stdout;
+}
+async function collectLargeFiles(root, dir, thresholdBytes, results) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    await Promise.all(entries.map(async (entry) => {
+        if (entry.isDirectory() && IGNORED_DIRS.has(entry.name))
+            return;
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            await collectLargeFiles(root, fullPath, thresholdBytes, results);
+            return;
+        }
+        if (!entry.isFile())
+            return;
+        const fileStat = await stat(fullPath);
+        if (fileStat.size > thresholdBytes) {
+            results.push({ path: relative(root, fullPath), bytes: fileStat.size });
+        }
+    }));
+}
+//# sourceMappingURL=realGitProxy.js.map
