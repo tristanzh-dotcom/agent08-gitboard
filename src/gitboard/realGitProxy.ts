@@ -8,7 +8,18 @@ import type { LargeFile } from "./types.js";
 const execFileAsync = promisify(execFile);
 
 const ALLOWED_COMMANDS = new Set(["status", "log", "diff", "stash"]);
-const IGNORED_DIRS = new Set([".git", "node_modules", "dist", ".venv", "__pycache__", "coverage"]);
+const IGNORED_DIRS = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  ".venv",
+  "__pycache__",
+  "coverage",
+  "_archive",
+  "_archive_legacy",
+  ".cache",
+  ".pytest_cache"
+]);
 
 export class RealGitProxy implements GitProxy {
   async statusPorcelain(repoPath: string): Promise<string> {
@@ -20,7 +31,14 @@ export class RealGitProxy implements GitProxy {
   }
 
   async diffStat(repoPath: string): Promise<string> {
-    return runReadOnlyGit(repoPath, ["diff", "--stat", "HEAD"]);
+    try {
+      return await runReadOnlyGit(repoPath, ["diff", "--stat", "HEAD"]);
+    } catch (error) {
+      if (error instanceof Error && /bad revision|ambiguous argument/i.test(error.message)) {
+        return "";
+      }
+      throw error;
+    }
   }
 
   async stashList(repoPath: string): Promise<string> {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -59,6 +59,28 @@ describe("RealGitProxy integration", () => {
     expect(() => assertReadOnlyGitArgs(["commit", "-m", "nope"])).toThrow(/not read-only/);
     expect(() => assertReadOnlyGitArgs(["stash", "pop"])).toThrow(/not read-only/);
   });
+
+  test("returns empty diff stat for a repo with no commits", async () => {
+    const repo = await createEmptyTempRepo("agent08-empty");
+
+    await expect(new RealGitProxy().diffStat(repo)).resolves.toBe("");
+  });
+
+  test("large file scan ignores archive and cache directories", async () => {
+    const repo = await createTempRepo("agent08-large-files", "main", "test: initialize large scan");
+    await mkdir(join(repo, "_archive"), { recursive: true });
+    await mkdir(join(repo, "_archive_legacy"), { recursive: true });
+    await mkdir(join(repo, ".cache"), { recursive: true });
+    await mkdir(join(repo, "data"), { recursive: true });
+    await writeFile(join(repo, "_archive", "ignored.bin"), Buffer.alloc(1_100_000));
+    await writeFile(join(repo, "_archive_legacy", "ignored.bin"), Buffer.alloc(1_100_000));
+    await writeFile(join(repo, ".cache", "ignored.bin"), Buffer.alloc(1_100_000));
+    await writeFile(join(repo, "data", "kept.bin"), Buffer.alloc(1_100_000));
+
+    const files = await new RealGitProxy().listLargeFiles(repo, 1_000_000);
+
+    expect(files).toEqual([{ path: "data/kept.bin", bytes: 1_100_000 }]);
+  });
 });
 
 async function createTempRepo(name: string, branch: string, subject: string): Promise<string> {
@@ -72,6 +94,13 @@ async function createTempRepo(name: string, branch: string, subject: string): Pr
   await execGit(dir, ["add", "README.md"]);
   await execGit(dir, ["commit", "-m", subject]);
 
+  return dir;
+}
+
+async function createEmptyTempRepo(name: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), `${name}-`));
+  tempDirs.push(dir);
+  await execGit(dir, ["init", "-b", "main"]);
   return dir;
 }
 
