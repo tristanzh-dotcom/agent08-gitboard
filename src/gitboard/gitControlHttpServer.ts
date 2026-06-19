@@ -7,6 +7,8 @@ export interface GitControlHttpService {
   mutationStatus(operationId: string): Promise<unknown>;
   prepareMutation(repoId: string, operation: string): Promise<unknown>;
   mutate(repoId: string, operation: string, body: Record<string, unknown>): Promise<unknown>;
+  backendStart?(agentId: string): Promise<unknown>;
+  backendRestart?(agentId: string): Promise<unknown>;
 }
 
 export interface GitControlHttpServerOptions {
@@ -89,6 +91,40 @@ async function dispatchGitControlHttpRequestUnsafe(
 
   if (request.method === "GET" && url.pathname === "/api/git-control/identity") {
     return { status: 200, body: { ok: true, agentId: "agent08", service: "git-control" } };
+  }
+
+  const backendMatch = url.pathname.match(/^\/api\/git-control\/backend\/([^/]+)\/(start|restart)$/);
+  if (request.method === "POST" && backendMatch) {
+    const agentId = decodeURIComponent(backendMatch[1]);
+    const action = backendMatch[2];
+    if (!["agent04", "agent06"].includes(agentId)) {
+      return {
+        status: 409,
+        body: {
+          error: {
+            code: "BACKEND_REPAIR_UNSUPPORTED_AGENT",
+            title: "Backend repair not available",
+            summary: `${agentId} is not managed by the Agent08 backend repair executor.`,
+            suggestedAction: "Use the documented manual startup path for this Agent.",
+          },
+        },
+      };
+    }
+    const repair = action === "start" ? service.backendStart : service.backendRestart;
+    if (!repair) {
+      return {
+        status: 503,
+        body: {
+          error: {
+            code: "BACKEND_REPAIR_EXECUTOR_UNAVAILABLE",
+            title: "Backend repair executor unavailable",
+            summary: "Agent08 Git Control is running without a backend process manager.",
+            suggestedAction: "Restart Agent08 Git Control with backend process manager support.",
+          },
+        },
+      };
+    }
+    return { status: 200, body: { ok: true, agentId, action, process: await repair(agentId) } };
   }
 
   const repoDetailMatch = url.pathname.match(/^\/api\/git-control\/repos\/([^/]+)$/);
