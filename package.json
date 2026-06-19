@@ -3,8 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agent08": "dist/gitboard/agent08Cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "agent08": "tsx src/gitboard/agent08Cli.ts",
+    "serve:git-control": "node dist/gitboard/gitControlServerMain.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
