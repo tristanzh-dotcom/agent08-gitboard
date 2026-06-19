@@ -30,6 +30,8 @@ const MUTATION_ROUTE_TO_OPERATION = new Map<string, string>([
   ["push", "push"],
   ["pull", "pull_ff_only"],
   ["stash-rebase", "stash_rebase"],
+  ["set-upstream", "set_upstream"],
+  ["push-upstream", "push_with_upstream"],
 ]);
 
 export function createGitControlHttpServer(options: GitControlHttpServerOptions): Server {
@@ -83,6 +85,10 @@ async function dispatchGitControlHttpRequestUnsafe(
 
   if (request.method === "GET" && url.pathname === "/api/git-control/scan") {
     return { status: 200, body: await service.scan() };
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/git-control/identity") {
+    return { status: 200, body: { ok: true, agentId: "agent08", service: "git-control" } };
   }
 
   const repoDetailMatch = url.pathname.match(/^\/api\/git-control\/repos\/([^/]+)$/);
@@ -194,6 +200,13 @@ function mutationSafetyErrorDetails(code: string): {
       suggestedAction: "Resolve the divergence outside v1.1 simple pull, then rescan.",
     };
   }
+  if (code === "COMMIT_PATH_BLOCKED") {
+    return {
+      title: "Commit blocked by generated files",
+      summary: "Selected files include dependency or runtime-output paths that Agent08 will not commit.",
+      suggestedAction: "Deselect those files or update .gitignore, rescan the repo, then retry commit.",
+    };
+  }
   if (code === "DETACHED_HEAD_BLOCKS_MUTATION") {
     return {
       title: "Mutation blocked on detached HEAD",
@@ -213,6 +226,48 @@ function mutationSafetyErrorDetails(code: string): {
       title: "Mutation blocked by missing upstream",
       summary: "The branch has no upstream configured for this operation.",
       suggestedAction: "Configure an upstream branch manually, rescan, then retry.",
+    };
+  }
+  if (code === "NO_COMMITS_TO_PUSH_WITH_UPSTREAM") {
+    return {
+      title: "Push with upstream blocked",
+      summary: "There are no local commits to publish for this branch.",
+      suggestedAction: "Rescan the repo. If it is already clean with no local commits, no push is needed.",
+    };
+  }
+  if (code === "DIRTY_BLOCKS_SET_UPSTREAM") {
+    return {
+      title: "Set upstream blocked by local changes",
+      summary: "The repository has local working tree changes, so Agent08 did not update upstream tracking.",
+      suggestedAction: "Commit or stash the local changes, rescan, then retry set upstream.",
+    };
+  }
+  if (code === "DIRTY_BLOCKS_PUSH_WITH_UPSTREAM") {
+    return {
+      title: "Push with upstream blocked by local changes",
+      summary: "The repository has local working tree changes, so Agent08 did not push or set upstream.",
+      suggestedAction: "Commit or stash the local changes, rescan, then retry push with upstream.",
+    };
+  }
+  if (code === "REMOTE_BRANCH_REQUIRED_FOR_SET_UPSTREAM") {
+    return {
+      title: "Set upstream blocked by missing remote branch",
+      summary: "Agent08 could not verify the matching origin branch required for local upstream setup.",
+      suggestedAction: "Rescan after the remote branch exists, or use push with upstream when publishing local commits.",
+    };
+  }
+  if (code === "BEHIND_BLOCKS_PUSH_WITH_UPSTREAM" || code === "DIVERGED_BLOCKS_PUSH_WITH_UPSTREAM") {
+    return {
+      title: "Push with upstream blocked by remote divergence",
+      summary: "The candidate remote branch has commits that are not safely included locally.",
+      suggestedAction: "Review the branch state and resolve divergence before publishing with upstream.",
+    };
+  }
+  if (code === "UPSTREAM_ALREADY_SET") {
+    return {
+      title: "Upstream setup is not needed",
+      summary: "The branch already has an upstream configured.",
+      suggestedAction: "Rescan the repo and use the normal push or pull action if one is available.",
     };
   }
   return {

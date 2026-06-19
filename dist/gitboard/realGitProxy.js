@@ -3,7 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
-const ALLOWED_COMMANDS = new Set(["status", "log", "diff", "stash"]);
+const ALLOWED_COMMANDS = new Set(["status", "log", "diff", "stash", "ls-remote"]);
 const IGNORED_DIRS = new Set([
     ".git",
     "node_modules",
@@ -37,6 +37,29 @@ export class RealGitProxy {
     async stashList(repoPath) {
         return runReadOnlyGit(repoPath, ["stash", "list"]);
     }
+    async remoteHasBranch(repoPath, branch) {
+        try {
+            const output = await runReadOnlyGit(repoPath, ["ls-remote", "--heads", "origin", branch], 5_000);
+            return output.trim().length > 0;
+        }
+        catch (_error) {
+            return false;
+        }
+    }
+    async commitsToPushSubjects(repoPath, branch, remoteHasBranch) {
+        const revision = remoteHasBranch ? `origin/${branch}..HEAD` : branch;
+        try {
+            const output = await runReadOnlyGit(repoPath, ["log", "--oneline", "--format=%s", "-5", revision]);
+            return output
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .slice(0, 5);
+        }
+        catch (_error) {
+            return [];
+        }
+    }
     async listLargeFiles(repoPath, thresholdBytes) {
         const results = [];
         await collectLargeFiles(repoPath, repoPath, thresholdBytes, results);
@@ -51,15 +74,18 @@ export function assertReadOnlyGitArgs(args) {
     if (command === "stash" && subcommand !== "list") {
         throw new Error(`git command is not read-only: ${args.join(" ")}`);
     }
+    if (command === "ls-remote" && !args.includes("--heads")) {
+        throw new Error(`git command is not read-only: ${args.join(" ")}`);
+    }
     if (args.some((arg) => /^(?:add|commit|push|pull|checkout|reset|clean|rm|mv|apply|pop)$/.test(arg))) {
         throw new Error(`git command is not read-only: ${args.join(" ")}`);
     }
 }
-async function runReadOnlyGit(repoPath, args) {
+async function runReadOnlyGit(repoPath, args, timeout = 10_000) {
     assertReadOnlyGitArgs(args);
     const { stdout } = await execFileAsync("git", args, {
         cwd: repoPath,
-        timeout: 10_000,
+        timeout,
         maxBuffer: 10 * 1024 * 1024
     });
     return stdout;

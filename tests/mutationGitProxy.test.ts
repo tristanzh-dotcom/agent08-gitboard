@@ -41,6 +41,94 @@ describe("Agent08 v1.1 GitProxy boundaries", () => {
     ]);
   });
 
+  test("mutation proxy blocks dependency and runtime paths before git add", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        return "";
+      },
+    });
+
+    await expect(
+      proxy.commit({
+        repoPath: "/tmp/repo",
+        message: "chore(agent07): selected files",
+        files: ["node_modules/.bin/vite"],
+      }),
+    ).rejects.toThrow(/COMMIT_PATH_BLOCKED/);
+    await expect(
+      proxy.commit({
+        repoPath: "/tmp/repo",
+        message: "chore(agent07): selected files",
+        files: ["storage/runtime_shadow/runtime_1/sources/source_stage_snapshot.json"],
+      }),
+    ).rejects.toThrow(/COMMIT_PATH_BLOCKED/);
+    await expect(
+      proxy.commit({
+        repoPath: "/tmp/repo",
+        message: "chore(agent07): selected files",
+        files: ["storage/mutations/op-1.json"],
+      }),
+    ).rejects.toThrow(/COMMIT_PATH_BLOCKED/);
+
+    expect(calls).toEqual([]);
+  });
+
+  test("mutation proxy force-adds tracked dist files while regular files use normal add", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async isTrackedFile(_repoPath, file) {
+        calls.push(["tracked", file]);
+        return file === "dist/gitboard/dashboardService.js";
+      },
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        return "";
+      },
+    });
+
+    await proxy.commit({
+      repoPath: "/tmp/repo",
+      message: "chore(agent08): rebuild runtime contract",
+      files: ["src/gitboard/mutationGitProxy.ts", "dist/gitboard/dashboardService.js"],
+    });
+
+    expect(calls).toEqual([
+      ["tracked", "dist/gitboard/dashboardService.js"],
+      ["add", "--", "src/gitboard/mutationGitProxy.ts"],
+      ["add", "-f", "--", "dist/gitboard/dashboardService.js"],
+      ["commit", "-m", "chore(agent08): rebuild runtime contract"],
+    ]);
+  });
+
+  test("mutation proxy blocks untracked dist files before git add", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async isTrackedFile(_repoPath, file) {
+        calls.push(["tracked", file]);
+        return false;
+      },
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        return "";
+      },
+    });
+
+    await expect(
+      proxy.commit({
+        repoPath: "/tmp/repo",
+        message: "chore(agent08): selected files",
+        files: ["dist/tmp/generated.js"],
+      }),
+    ).rejects.toThrow(/COMMIT_PATH_BLOCKED/);
+
+    expect(calls).toEqual([["tracked", "dist/tmp/generated.js"]]);
+  });
+
   test("mutation proxy exposes only safe typed sync workflows and never stash pop", async () => {
     const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
     const calls: string[][] = [];
@@ -67,5 +155,47 @@ describe("Agent08 v1.1 GitProxy boundaries", () => {
     ]);
     expect(calls.flat()).not.toContain("pop");
     expect(calls.flat()).not.toContain("apply");
+  });
+
+  test("mutation proxy builds set-upstream from typed branch and origin remote only", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        return "";
+      },
+    });
+
+    await proxy.setUpstream({ repoPath: "/tmp/repo", branch: "main", remote: "origin" });
+
+    expect(calls).toEqual([["branch", "--set-upstream-to", "origin/main", "main"]]);
+  });
+
+  test("mutation proxy builds push-with-upstream from typed branch and origin remote only", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        return "";
+      },
+    });
+
+    await proxy.pushWithUpstream({ repoPath: "/tmp/repo", branch: "main", remote: "origin" });
+
+    expect(calls).toEqual([["push", "-u", "origin", "main"]]);
+  });
+
+  test("mutation proxy rejects unsafe upstream branch names", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const proxy = new MutationGitProxy({ runGit: async () => "" });
+
+    await expect(proxy.setUpstream({ repoPath: "/tmp/repo", branch: "../main", remote: "origin" })).rejects.toThrow(
+      /unsafe branch/,
+    );
+    await expect(
+      proxy.pushWithUpstream({ repoPath: "/tmp/repo", branch: "main --force", remote: "origin" }),
+    ).rejects.toThrow(/unsafe branch/);
   });
 });

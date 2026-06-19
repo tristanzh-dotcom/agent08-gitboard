@@ -38,6 +38,11 @@ describe("git control HTTP server", () => {
       operationId: "op-1",
       status: "queued",
     });
+    await expectJson(service, "GET", "/api/git-control/identity", 200, {
+      ok: true,
+      agentId: "agent08",
+      service: "git-control",
+    });
   });
 
   test("routes mutation prepare and execute requests through the injected service", async () => {
@@ -76,6 +81,21 @@ describe("git control HTTP server", () => {
       { ok: true, repoId: "agent02-pvi", operation: "stash_rebase" },
       { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
     );
+    await expectJson(
+      service,
+      "POST",
+      "/api/git-control/repos/agent02-pvi/set-upstream/prepare",
+      200,
+      { repoId: "agent02-pvi", operation: "set_upstream", operationId: "op-prepare", confirmationToken: "token-1" },
+    );
+    await expectJson(
+      service,
+      "POST",
+      "/api/git-control/repos/agent02-pvi/push-upstream",
+      200,
+      { ok: true, repoId: "agent02-pvi", operation: "push_with_upstream" },
+      { preflightSnapshotId: "snap-2", confirmationToken: "token-2", branch: "ignored" },
+    );
 
     expect(seen).toEqual([
       { repoId: "agent02-pvi", operation: "commit" },
@@ -83,6 +103,12 @@ describe("git control HTTP server", () => {
         repoId: "agent02-pvi",
         operation: "stash_rebase",
         body: { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
+      },
+      { repoId: "agent02-pvi", operation: "set_upstream" },
+      {
+        repoId: "agent02-pvi",
+        operation: "push_with_upstream",
+        body: { preflightSnapshotId: "snap-2", confirmationToken: "token-2", branch: "ignored" },
       },
     ]);
   });
@@ -154,6 +180,78 @@ describe("git control HTTP server", () => {
         title: "Push blocked by local changes",
         summary: "The repository has local working tree changes, so push was not started.",
         suggestedAction: "Commit or stash the local changes, rescan the repo, then retry push.",
+      },
+    });
+  });
+
+  test("productizes blocked commit path safety errors", async () => {
+    const service: GitControlHttpService = {
+      async scan() {
+        return {};
+      },
+      async repoDetail() {
+        return {};
+      },
+      async mutationStatus() {
+        return {};
+      },
+      async prepareMutation() {
+        return {};
+      },
+      async mutate() {
+        throw new MutationSafetyError("COMMIT_PATH_BLOCKED");
+      },
+    };
+
+    const response = await dispatchGitControlHttpRequest(service, {
+      method: "POST",
+      path: "/api/git-control/repos/agent07-sentinel/commit",
+      body: { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: {
+        code: "COMMIT_PATH_BLOCKED",
+        title: "Commit blocked by generated files",
+        summary: "Selected files include dependency or runtime-output paths that Agent08 will not commit.",
+        suggestedAction: "Deselect those files or update .gitignore, rescan the repo, then retry commit.",
+      },
+    });
+  });
+
+  test("productizes push-with-upstream safety errors", async () => {
+    const service: GitControlHttpService = {
+      async scan() {
+        return {};
+      },
+      async repoDetail() {
+        return {};
+      },
+      async mutationStatus() {
+        return {};
+      },
+      async prepareMutation() {
+        return {};
+      },
+      async mutate() {
+        throw new MutationSafetyError("NO_COMMITS_TO_PUSH_WITH_UPSTREAM");
+      },
+    };
+
+    const response = await dispatchGitControlHttpRequest(service, {
+      method: "POST",
+      path: "/api/git-control/repos/agent02-pvi/push-upstream",
+      body: { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: {
+        code: "NO_COMMITS_TO_PUSH_WITH_UPSTREAM",
+        title: "Push with upstream blocked",
+        summary: "There are no local commits to publish for this branch.",
+        suggestedAction: "Rescan the repo. If it is already clean with no local commits, no push is needed.",
       },
     });
   });

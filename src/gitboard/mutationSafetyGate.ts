@@ -88,6 +88,8 @@ export class MutationSafetyGate {
     if (requiresUpstream(input.operation) && !input.currentSnapshot.upstream) throw new MutationSafetyError("UPSTREAM_MISSING");
     if (input.operation === "pull_ff_only") this.#assertCanPull(input.currentSnapshot);
     if (input.operation === "push") this.#assertCanPush(input.currentSnapshot);
+    if (input.operation === "set_upstream") this.#assertCanSetUpstream(input.currentSnapshot);
+    if (input.operation === "push_with_upstream") this.#assertCanPushWithUpstream(input.currentSnapshot);
   }
 
   #assertRepoAllowed(repoId: string, repoPath: string): void {
@@ -126,6 +128,22 @@ export class MutationSafetyGate {
     if (snapshot.behind > 0) throw new MutationSafetyError("DIVERGED_BLOCKS_SIMPLE_PUSH");
     if (hasDirtyFiles(snapshot)) throw new MutationSafetyError("DIRTY_BLOCKS_PUSH");
   }
+
+  #assertCanSetUpstream(snapshot: RepoSnapshot): void {
+    if (hasDirtyFiles(snapshot)) throw new MutationSafetyError("DIRTY_BLOCKS_SET_UPSTREAM");
+    if (snapshot.upstream) throw new MutationSafetyError("UPSTREAM_ALREADY_SET");
+    if (!snapshot.remoteHasBranch) throw new MutationSafetyError("REMOTE_BRANCH_REQUIRED_FOR_SET_UPSTREAM");
+    assertSafeBranch(snapshot.branch);
+  }
+
+  #assertCanPushWithUpstream(snapshot: RepoSnapshot): void {
+    if (hasDirtyFiles(snapshot)) throw new MutationSafetyError("DIRTY_BLOCKS_PUSH_WITH_UPSTREAM");
+    if (snapshot.upstream) throw new MutationSafetyError("UPSTREAM_ALREADY_SET");
+    if (snapshot.ahead > 0 && snapshot.behind > 0) throw new MutationSafetyError("DIVERGED_BLOCKS_PUSH_WITH_UPSTREAM");
+    if (snapshot.behind > 0) throw new MutationSafetyError("BEHIND_BLOCKS_PUSH_WITH_UPSTREAM");
+    if (snapshot.commitsToPushCount <= 0) throw new MutationSafetyError("NO_COMMITS_TO_PUSH_WITH_UPSTREAM");
+    assertSafeBranch(snapshot.branch);
+  }
 }
 
 function requiresUpstream(operation: SafetyOperation): boolean {
@@ -140,4 +158,10 @@ function hasDirtyFiles(snapshot: RepoSnapshot): boolean {
       snapshot.dirty.renamed.length >
     0
   );
+}
+
+function assertSafeBranch(branch: string | null): asserts branch is string {
+  if (!branch || !/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..")) {
+    throw new MutationSafetyError("UNSAFE_BRANCH_NAME");
+  }
 }

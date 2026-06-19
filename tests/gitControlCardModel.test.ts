@@ -13,8 +13,13 @@ function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
     exists: true,
     branch: "main",
     upstream: "origin/main",
+    remoteTrackingBranch: "origin/main",
+    remoteHasBranch: true,
+    upstreamState: "tracked",
     ahead: 0,
     behind: 0,
+    commitsToPushCount: 0,
+    commitsToPushSubjects: [],
     lastCommit: { sha: "abc123", subject: "test: fixture", authorDate: "2026-06-19T00:00:00.000Z" },
     dirty: { modified: [], untracked: [], deleted: [], renamed: [], stashCount: 0, largeFiles: [] },
     diffStat: { filesChanged: 0, insertions: 0, deletions: 0 },
@@ -118,6 +123,70 @@ describe("Git Control card model", () => {
     );
 
     expect(card.selfMutationWarning).toMatch(/Running service code will not change until restart/);
+  });
+
+  test("clean repo without upstream but with remote branch shows set-upstream instead of synced", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        upstream: null,
+        remoteHasBranch: true,
+        upstreamState: "missing_upstream_remote_exists",
+        commitsToPushCount: 0,
+        commitsToPushSubjects: [],
+      }),
+    );
+
+    expect(card.statusLine).toBe("main · no upstream");
+    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["set-upstream", true]]);
+  });
+
+  test("clean repo without upstream and with candidate commits shows push-upstream", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        upstream: null,
+        remoteHasBranch: false,
+        upstreamState: "missing_upstream_remote_missing",
+        commitsToPushCount: 1,
+        commitsToPushSubjects: ["feat(agent02): local commit"],
+      }),
+    );
+
+    expect(card.statusLine).toBe("main · no upstream");
+    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["push-upstream", true]]);
+  });
+
+  test("clean repo without upstream and without commits shows no publish action", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        upstream: null,
+        remoteHasBranch: false,
+        upstreamState: "missing_upstream_remote_missing",
+        commitsToPushCount: 0,
+        commitsToPushSubjects: [],
+      }),
+    );
+
+    expect(card.statusLine).toBe("main · no upstream");
+    expect(card.actions).toEqual([]);
+    expect(card.blockedReason).toBe("no commits to publish");
+  });
+
+  test("orphaned upstream is blocked and never rendered as synced", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        upstream: "origin/main",
+        remoteHasBranch: false,
+        upstreamState: "orphaned_upstream",
+      }),
+    );
+
+    expect(card.statusLine).toBe("main · upstream unreachable");
+    expect(card.actions).toEqual([]);
+    expect(card.blockedReason).toBe("upstream unreachable");
   });
 });
 

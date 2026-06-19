@@ -46,6 +46,39 @@ const dirtyGit: GitProxy = {
   async listLargeFiles() {
     return [];
   },
+  async remoteHasBranch() {
+    return true;
+  },
+  async commitsToPushSubjects() {
+    return ["feat(gitboard): expose dashboard service"];
+  },
+};
+
+const noUpstreamGit: GitProxy = {
+  async statusPorcelain() {
+    return [
+      "# branch.oid abcdef1234567890",
+      "# branch.head main",
+    ].join("\n");
+  },
+  async lastCommit() {
+    return "abcdef1|feat(agent02): local commit|2026-06-19T15:00:00.000Z";
+  },
+  async diffStat() {
+    return "";
+  },
+  async stashList() {
+    return "";
+  },
+  async listLargeFiles() {
+    return [];
+  },
+  async remoteHasBranch() {
+    return false;
+  },
+  async commitsToPushSubjects() {
+    return ["feat(agent02): local commit"];
+  },
 };
 
 describe("GitControlService", () => {
@@ -157,5 +190,207 @@ describe("GitControlService", () => {
       args: ["add", "--", "src/gitboard/gitControlService.ts"],
     });
     expect(calls[0]?.args).not.toContain(".");
+  });
+
+  test("force-adds tracked dist runtime contract files through commit mutation", async () => {
+    const calls: string[][] = [];
+    const service = createGitControlService({
+      git: dirtyGit,
+      manifest,
+      mutationProxy: new MutationGitProxy({
+        async isTrackedFile(_repoPath, file) {
+          return file === "dist/gitboard/dashboardService.js";
+        },
+        async runGit(_repoPath, args) {
+          calls.push(args);
+          return "ok";
+        },
+      }),
+      nowMs: () => 2_100,
+    });
+    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
+
+    await service.mutate("agent08-gitboard", "commit", {
+      operationId: prepared.operationId,
+      preflightSnapshotId: prepared.preflightSnapshotId,
+      confirmationToken: prepared.confirmationToken,
+      message: "test(agent08): tracked dist",
+      files: ["src/gitboard/mutationGitProxy.ts", "dist/gitboard/dashboardService.js"],
+    });
+
+    expect(calls).toEqual([
+      ["add", "--", "src/gitboard/mutationGitProxy.ts"],
+      ["add", "-f", "--", "dist/gitboard/dashboardService.js"],
+      ["commit", "-m", "test(agent08): tracked dist"],
+    ]);
+  });
+
+  test("returns productized safety error for untracked dist commit files", async () => {
+    const calls: string[][] = [];
+    const service = createGitControlService({
+      git: dirtyGit,
+      manifest,
+      mutationProxy: new MutationGitProxy({
+        async isTrackedFile() {
+          return false;
+        },
+        async runGit(_repoPath, args) {
+          calls.push(args);
+          return "ok";
+        },
+      }),
+      nowMs: () => 2_200,
+    });
+    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
+
+    await expect(
+      service.mutate("agent08-gitboard", "commit", {
+        operationId: prepared.operationId,
+        preflightSnapshotId: prepared.preflightSnapshotId,
+        confirmationToken: prepared.confirmationToken,
+        message: "test(agent08): untracked dist",
+        files: ["dist/tmp/generated.js"],
+      }),
+    ).rejects.toMatchObject({ code: "COMMIT_PATH_BLOCKED" });
+
+    expect(calls).toEqual([]);
+  });
+
+  test("returns a compact one-line output summary after commit success", async () => {
+    const service = createGitControlService({
+      git: dirtyGit,
+      manifest,
+      mutationProxy: new MutationGitProxy({
+        async runGit(_repoPath, args) {
+          if (args[0] === "commit") {
+            return [
+              "[main abc1234] chore(agent07-sentinel): commit selected repo changes",
+              "2032 files changed, 1265664 insertions(+)",
+              "create mode 120000 node_modules/.bin/vite",
+            ].join("\n");
+          }
+          return "";
+        },
+      }),
+      nowMs: () => 2_500,
+    });
+    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
+
+    const result = await service.mutate("agent08-gitboard", "commit", {
+      operationId: prepared.operationId,
+      preflightSnapshotId: prepared.preflightSnapshotId,
+      confirmationToken: prepared.confirmationToken,
+      message: "test(agent08): selected files",
+      files: ["src/gitboard/gitControlService.ts"],
+    });
+
+    expect(result.output).toContain("2032 files changed");
+    expect(result.outputSummary).toBe("[main abc1234] chore(agent07-sentinel): commit selected repo changes");
+    expect(result.outputSummary).not.toContain("\n");
+    expect(result.outputSummary.length).toBeLessThanOrEqual(160);
+  });
+
+  test("prepares set-upstream with branch, origin remote, and tracking branch details", async () => {
+    const service = createGitControlService({
+      git: {
+        ...noUpstreamGit,
+        async remoteHasBranch() {
+          return true;
+        },
+        async commitsToPushSubjects() {
+          return [];
+        },
+      },
+      manifest,
+      nowMs: () => 3_000,
+    });
+
+    const prepared = await service.prepareMutation("agent08-gitboard", "set_upstream");
+
+    expect(prepared).toMatchObject({
+      repoId: "agent08-gitboard",
+      operation: "set_upstream",
+      branch: "main",
+      remote: "origin",
+      remoteTrackingBranch: "origin/main",
+      currentUpstream: null,
+      warning: "This operation updates local Git tracking config and does not push commits.",
+    });
+  });
+
+  test("executes set-upstream using snapshot branch instead of request body branch", async () => {
+    const calls: string[][] = [];
+    const service = createGitControlService({
+      git: {
+        ...noUpstreamGit,
+        async remoteHasBranch() {
+          return true;
+        },
+        async commitsToPushSubjects() {
+          return [];
+        },
+      },
+      manifest,
+      mutationProxy: new MutationGitProxy({
+        async runGit(_repoPath, args) {
+          calls.push(args);
+          return "ok";
+        },
+      }),
+      nowMs: () => 4_000,
+    });
+    const prepared = await service.prepareMutation("agent08-gitboard", "set_upstream");
+
+    await service.mutate("agent08-gitboard", "set_upstream", {
+      operationId: prepared.operationId,
+      preflightSnapshotId: prepared.preflightSnapshotId,
+      confirmationToken: prepared.confirmationToken,
+      branch: "main --force" } as any);
+
+    expect(calls).toEqual([["branch", "--set-upstream-to", "origin/main", "main"]]);
+  });
+
+  test("prepares push-with-upstream with commit preview and explicit warning", async () => {
+    const service = createGitControlService({
+      git: noUpstreamGit,
+      manifest,
+      nowMs: () => 5_000,
+    });
+
+    const prepared = await service.prepareMutation("agent08-gitboard", "push_with_upstream");
+
+    expect(prepared).toMatchObject({
+      repoId: "agent08-gitboard",
+      operation: "push_with_upstream",
+      branch: "main",
+      remote: "origin",
+      ahead: 1,
+      commitsToPushSubjects: ["feat(agent02): local commit"],
+      warning: "This operation pushes to origin AND sets upstream tracking.",
+    });
+  });
+
+  test("executes push-with-upstream using typed proxy and snapshot branch", async () => {
+    const calls: string[][] = [];
+    const service = createGitControlService({
+      git: noUpstreamGit,
+      manifest,
+      mutationProxy: new MutationGitProxy({
+        async runGit(_repoPath, args) {
+          calls.push(args);
+          return "ok";
+        },
+      }),
+      nowMs: () => 6_000,
+    });
+    const prepared = await service.prepareMutation("agent08-gitboard", "push_with_upstream");
+
+    await service.mutate("agent08-gitboard", "push_with_upstream", {
+      operationId: prepared.operationId,
+      preflightSnapshotId: prepared.preflightSnapshotId,
+      confirmationToken: prepared.confirmationToken,
+      remote: "evil" } as any);
+
+    expect(calls).toEqual([["push", "-u", "origin", "main"]]);
   });
 });

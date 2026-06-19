@@ -9,8 +9,13 @@ const baseSnapshot: RepoSnapshot = {
   exists: true,
   branch: "main",
   upstream: "origin/main",
+  remoteTrackingBranch: "origin/main",
+  remoteHasBranch: true,
+  upstreamState: "tracked",
   ahead: 0,
   behind: 0,
+  commitsToPushCount: 0,
+  commitsToPushSubjects: [],
   lastCommit: {
     sha: "abcdef1",
     subject: "chore: restore repo split stash changes",

@@ -11,8 +11,13 @@ function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
     exists: true,
     branch: "main",
     upstream: "origin/main",
+    remoteTrackingBranch: "origin/main",
+    remoteHasBranch: true,
+    upstreamState: "tracked",
     ahead: 0,
     behind: 0,
+    commitsToPushCount: 0,
+    commitsToPushSubjects: [],
     lastCommit: { sha: "abc123", subject: "test: fixture", authorDate: "2026-06-19T00:00:00.000Z" },
     dirty: { modified: [], untracked: [], deleted: [], renamed: [], stashCount: 0, largeFiles: [] },
     diffStat: { filesChanged: 0, insertions: 0, deletions: 0 },
@@ -35,7 +40,7 @@ async function gate(nowMs: number | (() => number) = 0) {
 
 function tokenFor(
   safetyGate: any,
-  operation: "commit" | "push" | "pull_ff_only" | "stash_rebase",
+  operation: "commit" | "push" | "pull_ff_only" | "stash_rebase" | "set_upstream" | "push_with_upstream",
   preflightSnapshotId = "snap-1",
 ): string {
   return safetyGate.createConfirmationToken({
@@ -44,6 +49,16 @@ function tokenFor(
     preflightSnapshotId,
     operationId: "op-1",
   }).token;
+}
+
+function upstreamMutationRequest(operation: "set_upstream" | "push_with_upstream", currentSnapshot: RepoSnapshot) {
+  return {
+    repoId: "agent02-pvi",
+    repoPath: "/Users/tristanzh/agent/agent02-pvi",
+    operation,
+    preflightSnapshotId: "snap-1",
+    currentSnapshot,
+  };
 }
 
 describe("MutationSafetyGate", () => {
@@ -207,6 +222,130 @@ describe("MutationSafetyGate", () => {
         currentSnapshot: snapshot({ upstream: null, ahead: 1 }),
       }),
     ).toThrow(/UPSTREAM_MISSING/);
+  });
+
+  test("blocks set-upstream when the working tree is dirty", async () => {
+    const safetyGate = await gate();
+    const confirmationToken = tokenFor(safetyGate, "set_upstream");
+
+    expect(() =>
+      safetyGate.assertCanMutate({
+        ...upstreamMutationRequest(
+          "set_upstream",
+          snapshot({
+            upstream: null,
+            upstreamState: "missing_upstream_remote_exists",
+            dirty: { ...snapshot().dirty, modified: ["README.md"] },
+          }),
+        ),
+        confirmationToken,
+      }),
+    ).toThrow(/DIRTY_BLOCKS_SET_UPSTREAM/);
+  });
+
+  test("blocks set-upstream when upstream already exists", async () => {
+    const safetyGate = await gate();
+    const confirmationToken = tokenFor(safetyGate, "set_upstream");
+
+    expect(() =>
+      safetyGate.assertCanMutate({
+        ...upstreamMutationRequest("set_upstream", snapshot({ upstream: "origin/main" })),
+        confirmationToken,
+      }),
+    ).toThrow(/UPSTREAM_ALREADY_SET/);
+  });
+
+  test("blocks set-upstream when the remote tracking branch is unavailable", async () => {
+    const safetyGate = await gate();
+    const confirmationToken = tokenFor(safetyGate, "set_upstream");
+
+    expect(() =>
+      safetyGate.assertCanMutate({
+        ...upstreamMutationRequest(
+          "set_upstream",
+          snapshot({
+            upstream: null,
+            remoteHasBranch: false,
+            upstreamState: "missing_upstream_remote_missing",
+          }),
+        ),
+        confirmationToken,
+      }),
+    ).toThrow(/REMOTE_BRANCH_REQUIRED_FOR_SET_UPSTREAM/);
+  });
+
+  test("blocks push-with-upstream when dirty or there are no commits to push", async () => {
+    const dirtyGate = await gate();
+    const dirtyToken = tokenFor(dirtyGate, "push_with_upstream");
+    expect(() =>
+      dirtyGate.assertCanMutate({
+        ...upstreamMutationRequest(
+          "push_with_upstream",
+          snapshot({
+            upstream: null,
+            commitsToPushCount: 2,
+            commitsToPushSubjects: ["feat: local one", "fix: local two"],
+            dirty: { ...snapshot().dirty, untracked: ["scratch.txt"] },
+          }),
+        ),
+        confirmationToken: dirtyToken,
+      }),
+    ).toThrow(/DIRTY_BLOCKS_PUSH_WITH_UPSTREAM/);
+
+    const emptyGate = await gate();
+    const emptyToken = tokenFor(emptyGate, "push_with_upstream");
+    expect(() =>
+      emptyGate.assertCanMutate({
+        ...upstreamMutationRequest(
+          "push_with_upstream",
+          snapshot({
+            upstream: null,
+            remoteHasBranch: false,
+            upstreamState: "missing_upstream_remote_missing",
+            commitsToPushCount: 0,
+            commitsToPushSubjects: [],
+          }),
+        ),
+        confirmationToken: emptyToken,
+      }),
+    ).toThrow(/NO_COMMITS_TO_PUSH_WITH_UPSTREAM/);
+  });
+
+  test("blocks push-with-upstream when the candidate remote branch is behind or diverged", async () => {
+    const behindGate = await gate();
+    const behindToken = tokenFor(behindGate, "push_with_upstream");
+    expect(() =>
+      behindGate.assertCanMutate({
+        ...upstreamMutationRequest(
+          "push_with_upstream",
+          snapshot({
+            upstream: null,
+            commitsToPushCount: 1,
+            commitsToPushSubjects: ["feat: local"],
+            behind: 1,
+          }),
+        ),
+        confirmationToken: behindToken,
+      }),
+    ).toThrow(/BEHIND_BLOCKS_PUSH_WITH_UPSTREAM/);
+
+    const divergedGate = await gate();
+    const divergedToken = tokenFor(divergedGate, "push_with_upstream");
+    expect(() =>
+      divergedGate.assertCanMutate({
+        ...upstreamMutationRequest(
+          "push_with_upstream",
+          snapshot({
+            upstream: null,
+            commitsToPushCount: 1,
+            commitsToPushSubjects: ["feat: local"],
+            ahead: 1,
+            behind: 1,
+          }),
+        ),
+        confirmationToken: divergedToken,
+      }),
+    ).toThrow(/DIVERGED_BLOCKS_PUSH_WITH_UPSTREAM/);
   });
 
   test("blocks missing, expired, reused, and mismatched confirmation tokens", async () => {

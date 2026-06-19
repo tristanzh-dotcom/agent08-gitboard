@@ -1,7 +1,16 @@
-export type MutationGitOperation = "commit" | "push" | "pull_ff_only" | "stash" | "rebase" | "stash_rebase";
+export type MutationGitOperation =
+  | "commit"
+  | "push"
+  | "pull_ff_only"
+  | "stash"
+  | "rebase"
+  | "stash_rebase"
+  | "set_upstream"
+  | "push_with_upstream";
 
 export interface MutationGitRunner {
   runGit(repoPath: string, args: string[]): Promise<string>;
+  isTrackedFile?(repoPath: string, file: string): Promise<boolean>;
 }
 
 export interface CommitMutationInput {
@@ -12,6 +21,12 @@ export interface CommitMutationInput {
 
 export interface RepoPathMutationInput {
   repoPath: string;
+}
+
+export interface UpstreamMutationInput {
+  repoPath: string;
+  branch: string;
+  remote: "origin";
 }
 
 export interface StashRebaseMutationInput {
@@ -27,9 +42,23 @@ const ALLOWED_MUTATION_OPERATIONS = new Set<MutationGitOperation>([
   "stash",
   "rebase",
   "stash_rebase",
+  "set_upstream",
+  "push_with_upstream",
 ]);
 
 const FORBIDDEN_ARGS = new Set(["--force", "--force-with-lease", "reset", "clean", "checkout", "branch", "-D", "pop", "apply"]);
+
+const ALWAYS_BLOCKED_COMMIT_PATH_PREFIXES = [
+  "node_modules/",
+  "storage/",
+  ".cache/",
+  ".pytest_cache/",
+  ".vite/",
+  "build/",
+  "coverage/",
+];
+
+const TRACKED_ONLY_COMMIT_PATH_PREFIXES = ["dist/"];
 
 export class MutationGitProxy {
   readonly #runner: MutationGitRunner;
@@ -42,8 +71,13 @@ export class MutationGitProxy {
     const message = input.message.trim();
     if (!message) throw new Error("COMMIT_MESSAGE_REQUIRED");
     const files = input.files?.length ? input.files : ["."];
-    assertCommitFilePaths(files);
-    await this.#runner.runGit(input.repoPath, ["add", "--", ...files]);
+    const addPlan = await planCommitFileAdds(this.#runner, input.repoPath, files);
+    if (addPlan.normalFiles.length > 0) {
+      await this.#runner.runGit(input.repoPath, ["add", "--", ...addPlan.normalFiles]);
+    }
+    if (addPlan.forceFiles.length > 0) {
+      await this.#runner.runGit(input.repoPath, ["add", "-f", "--", ...addPlan.forceFiles]);
+    }
     return this.#runner.runGit(input.repoPath, ["commit", "-m", message]);
   }
 
@@ -69,6 +103,23 @@ export class MutationGitProxy {
     await this.#runner.runGit(input.repoPath, ["stash", "push", "-u", "-m", `agent08: pre-rebase ${input.operationId}`]);
     return this.#runner.runGit(input.repoPath, ["rebase", input.upstream]);
   }
+
+  async setUpstream(input: UpstreamMutationInput): Promise<string> {
+    assertOriginRemote(input.remote);
+    assertBranch(input.branch);
+    return this.#runner.runGit(input.repoPath, [
+      "branch",
+      "--set-upstream-to",
+      `${input.remote}/${input.branch}`,
+      input.branch,
+    ]);
+  }
+
+  async pushWithUpstream(input: UpstreamMutationInput): Promise<string> {
+    assertOriginRemote(input.remote);
+    assertBranch(input.branch);
+    return this.#runner.runGit(input.repoPath, ["push", "-u", input.remote, input.branch]);
+  }
 }
 
 export function assertAllowedMutationOperation(operation: string): asserts operation is MutationGitOperation {
@@ -85,16 +136,66 @@ export function assertMutationArgs(args: string[]): void {
   }
 }
 
-function assertCommitFilePaths(files: string[]): void {
+async function planCommitFileAdds(
+  runner: MutationGitRunner,
+  repoPath: string,
+  files: string[],
+): Promise<{ normalFiles: string[]; forceFiles: string[] }> {
+  const normalFiles: string[] = [];
+  const forceFiles: string[] = [];
+
   for (const file of files) {
-    if (file.startsWith("/") || file.includes("..")) {
+    const normalized = file.replaceAll("\\", "/").replace(/^\.\//, "");
+    if (normalized.startsWith("/") || normalized.split("/").includes("..")) {
       throw new Error(`unsafe commit file path: ${file}`);
     }
+    if (pathMatchesPrefixes(normalized, ALWAYS_BLOCKED_COMMIT_PATH_PREFIXES)) {
+      throw new Error("COMMIT_PATH_BLOCKED");
+    }
+    if (pathMatchesPrefixes(normalized, TRACKED_ONLY_COMMIT_PATH_PREFIXES)) {
+      if (!(await isTrackedFile(runner, repoPath, normalized))) {
+        throw new Error("COMMIT_PATH_BLOCKED");
+      }
+      forceFiles.push(file);
+    } else {
+      normalFiles.push(file);
+    }
+  }
+
+  return { normalFiles, forceFiles };
+}
+
+function pathMatchesPrefixes(path: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) => path === prefix.slice(0, -1) || path.startsWith(prefix));
+}
+
+async function isTrackedFile(runner: MutationGitRunner, repoPath: string, file: string): Promise<boolean> {
+  if (runner.isTrackedFile) {
+    return runner.isTrackedFile(repoPath, file);
+  }
+
+  try {
+    await runner.runGit(repoPath, ["ls-files", "--error-unmatch", "--", file]);
+    return true;
+  } catch {
+    return false;
   }
 }
 
 function assertUpstream(upstream: string): void {
   if (!/^[A-Za-z0-9._/-]+$/.test(upstream) || upstream.includes("..")) {
     throw new Error(`unsafe upstream: ${upstream}`);
+  }
+}
+
+function assertBranch(branch: string): void {
+  if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..")) {
+    throw new Error(`unsafe branch: ${branch}`);
+  }
+}
+
+function assertOriginRemote(remote: string): asserts remote is "origin" {
+  if (remote !== "origin") {
+    throw new Error(`unsupported remote: ${remote}`);
   }
 }

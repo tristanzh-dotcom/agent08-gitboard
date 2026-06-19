@@ -17,15 +17,31 @@ export class RepoScanner {
             ]);
             const parsedStatus = parseStatusPorcelain(status);
             const parsedCommit = parseLastCommit(lastCommit);
+            const branch = normalizeBranch(parsedStatus.branch);
+            const remoteTrackingBranch = branch ? `origin/${branch}` : null;
+            const remoteHasBranch = branch && this.git.remoteHasBranch ? await this.git.remoteHasBranch(target.path, branch) : false;
+            const commitsToPushSubjects = branch && this.git.commitsToPushSubjects
+                ? (await this.git.commitsToPushSubjects(target.path, branch, remoteHasBranch)).slice(0, 5)
+                : [];
+            const upstreamState = determineUpstreamState({
+                branch,
+                upstream: parsedStatus.upstream,
+                remoteHasBranch
+            });
             return {
                 id: target.id,
                 path: target.path,
                 remote: target.remote,
                 exists: true,
-                branch: parsedStatus.branch,
+                branch,
                 upstream: parsedStatus.upstream,
+                remoteTrackingBranch,
+                remoteHasBranch,
+                upstreamState,
                 ahead: parsedStatus.ahead,
                 behind: parsedStatus.behind,
+                commitsToPushCount: commitsToPushSubjects.length,
+                commitsToPushSubjects,
                 lastCommit: parsedCommit,
                 dirty: {
                     ...parsedStatus.dirty,
@@ -135,8 +151,13 @@ function missingRepoSnapshot(target) {
         exists: false,
         branch: null,
         upstream: null,
+        remoteTrackingBranch: null,
+        remoteHasBranch: false,
+        upstreamState: "unknown",
         ahead: 0,
         behind: 0,
+        commitsToPushCount: 0,
+        commitsToPushSubjects: [],
         lastCommit: { sha: null, subject: null, authorDate: null },
         dirty: {
             modified: [],
@@ -149,6 +170,24 @@ function missingRepoSnapshot(target) {
         diffStat: { filesChanged: 0, insertions: 0, deletions: 0 },
         healthScore: emptyHealthScore()
     };
+}
+function normalizeBranch(branch) {
+    if (!branch || branch === "(detached)")
+        return null;
+    return branch;
+}
+function determineUpstreamState(input) {
+    if (!input.branch)
+        return "detached";
+    if (input.upstream && input.remoteHasBranch)
+        return "tracked";
+    if (input.upstream && !input.remoteHasBranch)
+        return "orphaned_upstream";
+    if (!input.upstream && input.remoteHasBranch)
+        return "missing_upstream_remote_exists";
+    if (!input.upstream && !input.remoteHasBranch)
+        return "missing_upstream_remote_missing";
+    return "unknown";
 }
 function emptyHealthScore() {
     return {

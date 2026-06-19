@@ -9,8 +9,13 @@ export interface MutationPreflightSnapshot {
   createdAt: string;
   branch: string | null;
   upstream: string | null;
+  remote?: "origin";
+  remoteTrackingBranch?: string | null;
+  remoteHasBranch?: boolean;
   ahead: number;
   behind: number;
+  commitsToPushCount?: number;
+  commitsToPushSubjects?: string[];
   dirty: {
     modified: string[];
     untracked: string[];
@@ -69,8 +74,13 @@ function sanitizePreflight(input: MutationPreflightSnapshot): MutationPreflightS
     createdAt: input.createdAt,
     branch: input.branch,
     upstream: input.upstream,
+    remote: input.remote,
+    remoteTrackingBranch: input.remoteTrackingBranch,
+    remoteHasBranch: input.remoteHasBranch,
     ahead: input.ahead,
     behind: input.behind,
+    commitsToPushCount: input.commitsToPushCount,
+    commitsToPushSubjects: input.commitsToPushSubjects ? [...input.commitsToPushSubjects] : undefined,
     dirty: {
       modified: [...input.dirty.modified],
       untracked: [...input.dirty.untracked],

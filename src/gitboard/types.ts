@@ -27,8 +27,19 @@ export interface RepoSnapshot {
   exists: boolean;
   branch: string | null;
   upstream: string | null;
+  remoteTrackingBranch: string | null;
+  remoteHasBranch: boolean;
+  upstreamState:
+    | "tracked"
+    | "orphaned_upstream"
+    | "missing_upstream_remote_exists"
+    | "missing_upstream_remote_missing"
+    | "detached"
+    | "unknown";
   ahead: number;
   behind: number;
+  commitsToPushCount: number;
+  commitsToPushSubjects: string[];
   lastCommit: {
     sha: string | null;
     subject: string | null;

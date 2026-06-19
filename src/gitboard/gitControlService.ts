@@ -8,7 +8,7 @@ import type { GitProxy } from "./gitProxy.js";
 import { createDefaultManifest } from "./manifest.js";
 import type { MutationGitOperation, MutationGitRunner } from "./mutationGitProxy.js";
 import { MutationGitProxy } from "./mutationGitProxy.js";
-import { MutationSafetyGate } from "./mutationSafetyGate.js";
+import { MutationSafetyError, MutationSafetyGate } from "./mutationSafetyGate.js";
 import { MutationSnapshotStore, type MutationPreflightSnapshot } from "./mutationSnapshotStore.js";
 import { RealGitProxy } from "./realGitProxy.js";
 import { RepoScanner } from "./repoScanner.js";
@@ -46,6 +46,13 @@ export interface GitControlPrepareResponse {
   preflightSnapshotId: string;
   confirmationToken: string;
   expiresAtMs: number;
+  branch?: string | null;
+  remote?: "origin";
+  remoteTrackingBranch?: string | null;
+  currentUpstream?: string | null;
+  ahead?: number;
+  commitsToPushSubjects?: string[];
+  warning?: string;
 }
 
 export interface GitControlMutationResponse {
@@ -55,6 +62,7 @@ export interface GitControlMutationResponse {
   operation: MutationGitOperation;
   beforeSnapshotId: string;
   output: string;
+  outputSummary: string;
 }
 
 export interface GitControlMutationRequest {
@@ -139,6 +147,7 @@ export function createGitControlService({
       preflightSnapshotId: operationId,
       confirmationToken: token.token,
       expiresAtMs: token.expiresAtMs,
+      ...prepareMutationDetails(operation, snapshot),
     };
   }
 
@@ -169,6 +178,7 @@ export function createGitControlService({
       operation,
       beforeSnapshotId: preflightSnapshotId,
       output,
+      outputSummary: summarizeMutationOutput(operation, output),
     };
   }
 
@@ -188,11 +198,18 @@ export function createGitControlService({
     body: GitControlMutationRequest,
   ): Promise<string> {
     if (operation === "commit") {
-      return mutationProxy.commit({
-        repoPath: snapshot.path,
-        message: requireString(body.message, "message"),
-        files: body.files,
-      });
+      try {
+        return await mutationProxy.commit({
+          repoPath: snapshot.path,
+          message: requireString(body.message, "message"),
+          files: body.files,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message === "COMMIT_PATH_BLOCKED") {
+          throw new MutationSafetyError("COMMIT_PATH_BLOCKED");
+        }
+        throw error;
+      }
     }
     if (operation === "push") return mutationProxy.push({ repoPath: snapshot.path });
     if (operation === "pull_ff_only") return mutationProxy.pullFastForward({ repoPath: snapshot.path });
@@ -201,6 +218,20 @@ export function createGitControlService({
         repoPath: snapshot.path,
         operationId: body.operationId ?? requireString(body.preflightSnapshotId, "preflightSnapshotId"),
         upstream: requireString(snapshot.upstream, "upstream"),
+      });
+    }
+    if (operation === "set_upstream") {
+      return mutationProxy.setUpstream({
+        repoPath: snapshot.path,
+        branch: requireString(snapshot.branch, "branch"),
+        remote: "origin",
+      });
+    }
+    if (operation === "push_with_upstream") {
+      return mutationProxy.pushWithUpstream({
+        repoPath: snapshot.path,
+        branch: requireString(snapshot.branch, "branch"),
+        remote: "origin",
       });
     }
     throw new Error(`command not allowed: ${operation}`);
@@ -240,7 +271,9 @@ function assertMutationOperation(operation: string): MutationGitOperation {
     operation === "pull_ff_only" ||
     operation === "stash" ||
     operation === "rebase" ||
-    operation === "stash_rebase"
+    operation === "stash_rebase" ||
+    operation === "set_upstream" ||
+    operation === "push_with_upstream"
   ) {
     return operation;
   }
@@ -263,6 +296,11 @@ function toPreflightSnapshot(
     upstream: snapshot.upstream,
     ahead: snapshot.ahead,
     behind: snapshot.behind,
+    remote: "origin",
+    remoteTrackingBranch: snapshot.remoteTrackingBranch,
+    remoteHasBranch: snapshot.remoteHasBranch,
+    commitsToPushCount: snapshot.commitsToPushCount,
+    commitsToPushSubjects: [...snapshot.commitsToPushSubjects],
     dirty: {
       modified: [...snapshot.dirty.modified],
       untracked: [...snapshot.dirty.untracked],
@@ -272,6 +310,33 @@ function toPreflightSnapshot(
     lastCommitSha: snapshot.lastCommit.sha,
     worktreeState: snapshot.branch ? (hasDirtyFiles(snapshot) ? "dirty" : "clean") : "detached",
   };
+}
+
+function prepareMutationDetails(
+  operation: MutationGitOperation,
+  snapshot: RepoSnapshot,
+): Partial<GitControlPrepareResponse> {
+  if (operation === "set_upstream") {
+    return {
+      branch: snapshot.branch,
+      remote: "origin",
+      remoteTrackingBranch: snapshot.remoteTrackingBranch,
+      currentUpstream: snapshot.upstream,
+      warning: "This operation updates local Git tracking config and does not push commits.",
+    };
+  }
+  if (operation === "push_with_upstream") {
+    return {
+      branch: snapshot.branch,
+      remote: "origin",
+      remoteTrackingBranch: snapshot.remoteTrackingBranch,
+      currentUpstream: snapshot.upstream,
+      ahead: snapshot.commitsToPushCount,
+      commitsToPushSubjects: [...snapshot.commitsToPushSubjects],
+      warning: "This operation pushes to origin AND sets upstream tracking.",
+    };
+  }
+  return {};
 }
 
 function hasDirtyFiles(snapshot: RepoSnapshot): boolean {
@@ -287,6 +352,20 @@ function hasDirtyFiles(snapshot: RepoSnapshot): boolean {
 function requireString(value: unknown, name: string): string {
   if (typeof value === "string" && value.length > 0) return value;
   throw new Error(`${name} is required`);
+}
+
+function summarizeMutationOutput(operation: MutationGitOperation, output: string): string {
+  if (operation !== "commit") return firstShortLine(output, `${operation} complete`);
+  return firstShortLine(output, "commit complete");
+}
+
+function firstShortLine(output: string, fallback: string): string {
+  const firstLine = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  const summary = firstLine ?? fallback;
+  return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
 }
 
 class ExecMutationGitRunner implements MutationGitRunner {
