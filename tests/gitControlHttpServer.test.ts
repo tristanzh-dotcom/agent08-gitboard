@@ -113,6 +113,60 @@ describe("git control HTTP server", () => {
     ]);
   });
 
+  test("routes backend start and restart through the injected backend manager wrapper", async () => {
+    const calls: string[] = [];
+    const service: GitControlHttpService = {
+      async scan() {
+        return {};
+      },
+      async repoDetail() {
+        return {};
+      },
+      async mutationStatus() {
+        return {};
+      },
+      async prepareMutation() {
+        return {};
+      },
+      async mutate() {
+        return {};
+      },
+      async backendStart(agentId) {
+        calls.push(`start:${agentId}`);
+        return { agentId, status: "started", pid: 4204, port: 8004 };
+      },
+      async backendRestart(agentId) {
+        calls.push(`restart:${agentId}`);
+        return { agentId, status: "restarted", pid: 4206, port: 8086 };
+      },
+    };
+
+    await expectJson(service, "POST", "/api/git-control/backend/agent04/start", 200, {
+      ok: true,
+      agentId: "agent04",
+      action: "start",
+      process: { agentId: "agent04", status: "started", pid: 4204, port: 8004 },
+    });
+    await expectJson(service, "POST", "/api/git-control/backend/agent06/restart", 200, {
+      ok: true,
+      agentId: "agent06",
+      action: "restart",
+      process: { agentId: "agent06", status: "restarted", pid: 4206, port: 8086 },
+    });
+    await expectJson(service, "POST", "/api/git-control/backend/agent04/stop", 404, {
+      error: { code: "NOT_FOUND" },
+    });
+    await expectJson(service, "POST", "/api/git-control/backend/agent05/start", 409, {
+      error: {
+        code: "BACKEND_REPAIR_UNSUPPORTED_AGENT",
+        title: "Backend repair not available",
+        summary: "agent05 is not managed by the Agent08 backend repair executor.",
+        suggestedAction: "Use the documented manual startup path for this Agent.",
+      },
+    });
+    expect(calls).toEqual(["start:agent04", "restart:agent06"]);
+  });
+
   test("returns productized errors instead of raw exception text", async () => {
     const service: GitControlHttpService = {
       async scan() {
