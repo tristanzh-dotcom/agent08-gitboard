@@ -50,6 +50,7 @@ export interface RepoSnapshot {
     untracked: string[];
     deleted: string[];
     renamed: string[];
+    unmerged?: string[];
     stashCount: number;
     largeFiles: LargeFile[];
   };

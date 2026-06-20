@@ -24,7 +24,8 @@ function dirtyFileCount(snapshot) {
     return (snapshot.dirty.modified.length +
         snapshot.dirty.untracked.length +
         snapshot.dirty.deleted.length +
-        snapshot.dirty.renamed.length);
+        snapshot.dirty.renamed.length +
+        (snapshot.dirty.unmerged?.length ?? 0));
 }
 function isStale(snapshot, now) {
     if (!snapshot.lastCommit.authorDate)

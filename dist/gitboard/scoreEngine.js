@@ -20,6 +20,7 @@ function scoreCleanliness(snapshot, reasons) {
         snapshot.dirty.untracked.length +
         snapshot.dirty.deleted.length +
         snapshot.dirty.renamed.length +
+        (snapshot.dirty.unmerged?.length ?? 0) +
         snapshot.dirty.stashCount;
     if (dirtyCount === 0)
         return 40;

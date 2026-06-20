@@ -75,6 +75,7 @@ function parseStatusPorcelain(status: string): Pick<
     untracked: [] as string[],
     deleted: [] as string[],
     renamed: [] as string[],
+    unmerged: [] as string[],
     stashCount: 0,
     largeFiles: []
   };
@@ -118,6 +119,11 @@ function parseStatusPorcelain(status: string): Pick<
       if (tabIndex >= 0) {
         dirty.renamed.push(line.slice(tabIndex + 1));
       }
+      continue;
+    }
+    if (line.startsWith("u ")) {
+      const filePath = line.split(" ").slice(10).join(" ");
+      if (filePath) dirty.unmerged.push(filePath);
     }
   }
 
@@ -182,6 +188,7 @@ function missingRepoSnapshot(target: RepoManifestEntry): RepoSnapshot {
       untracked: [],
       deleted: [],
       renamed: [],
+      unmerged: [],
       stashCount: 0,
       largeFiles: []
     },

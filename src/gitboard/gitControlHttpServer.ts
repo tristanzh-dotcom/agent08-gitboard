@@ -250,6 +250,13 @@ function mutationSafetyErrorDetails(code: string): {
       suggestedAction: "Deselect those files or update .gitignore, rescan the repo, then retry commit.",
     };
   }
+  if (code === "UNMERGED_BLOCKS_COMMIT") {
+    return {
+      title: "Commit blocked by unresolved conflicts",
+      summary: "The repository has unmerged conflict files, so Agent08 did not prepare a commit.",
+      suggestedAction: "Resolve the conflicts, rescan the repo, then retry commit.",
+    };
+  }
   if (code === "DETACHED_HEAD_BLOCKS_MUTATION") {
     return {
       title: "Mutation blocked on detached HEAD",

@@ -85,6 +85,9 @@ export class MutationSafetyGate {
     this.#consumeValidToken(input);
     if (input.mergeInProgress || input.rebaseInProgress) throw new MutationSafetyError("MERGE_OR_REBASE_IN_PROGRESS");
     if (!input.currentSnapshot.branch) throw new MutationSafetyError("DETACHED_HEAD_BLOCKS_MUTATION");
+    if (input.operation === "commit" && hasUnmergedFiles(input.currentSnapshot)) {
+      throw new MutationSafetyError("UNMERGED_BLOCKS_COMMIT");
+    }
     if (requiresUpstream(input.operation) && !input.currentSnapshot.upstream) throw new MutationSafetyError("UPSTREAM_MISSING");
     if (input.operation === "pull_ff_only") this.#assertCanPull(input.currentSnapshot);
     if (input.operation === "push") this.#assertCanPush(input.currentSnapshot);
@@ -155,9 +158,14 @@ function hasDirtyFiles(snapshot: RepoSnapshot): boolean {
     snapshot.dirty.modified.length +
       snapshot.dirty.untracked.length +
       snapshot.dirty.deleted.length +
-      snapshot.dirty.renamed.length >
+      snapshot.dirty.renamed.length +
+      (snapshot.dirty.unmerged?.length ?? 0) >
     0
   );
+}
+
+function hasUnmergedFiles(snapshot: RepoSnapshot): boolean {
+  return (snapshot.dirty.unmerged?.length ?? 0) > 0;
 }
 
 function assertSafeBranch(branch: string | null): asserts branch is string {

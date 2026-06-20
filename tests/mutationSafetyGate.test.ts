@@ -208,6 +208,28 @@ describe("MutationSafetyGate", () => {
     ).toThrow(/MERGE_OR_REBASE_IN_PROGRESS/);
   });
 
+  test("blocks commit when the worktree has unmerged conflict files", async () => {
+    const safetyGate = await gate();
+    const confirmationToken = tokenFor(safetyGate, "commit");
+
+    expect(() =>
+      safetyGate.assertCanMutate({
+        repoId: "agent02-pvi",
+        repoPath: "/Users/tristanzh/agent/agent02-pvi",
+        operation: "commit",
+        preflightSnapshotId: "snap-1",
+        confirmationToken,
+        currentSnapshot: snapshot({
+          dirty: {
+            ...snapshot().dirty,
+            modified: ["workflows/foreign-jv-china-watch/src/agent02-adapter.mjs"],
+            unmerged: ["workflows/foreign-jv-china-watch/data/latest_card_payload.json"],
+          },
+        }),
+      }),
+    ).toThrow(/UNMERGED_BLOCKS_COMMIT/);
+  });
+
   test("blocks upstream-required operations when upstream is missing", async () => {
     const safetyGate = await gate();
     const confirmationToken = tokenFor(safetyGate, "push");

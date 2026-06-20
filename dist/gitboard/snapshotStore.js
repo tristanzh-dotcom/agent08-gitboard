@@ -33,6 +33,7 @@ function dirtyCount(snapshot) {
         snapshot.dirty.untracked.length +
         snapshot.dirty.deleted.length +
         snapshot.dirty.renamed.length +
+        (snapshot.dirty.unmerged?.length ?? 0) +
         snapshot.dirty.stashCount +
         snapshot.dirty.largeFiles.length);
 }

@@ -33,7 +33,8 @@ function dirtyFileCount(snapshot: RepoSnapshot): number {
     snapshot.dirty.modified.length +
     snapshot.dirty.untracked.length +
     snapshot.dirty.deleted.length +
-    snapshot.dirty.renamed.length
+    snapshot.dirty.renamed.length +
+    (snapshot.dirty.unmerged?.length ?? 0)
   );
 }
 

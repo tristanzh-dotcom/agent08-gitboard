@@ -81,6 +81,20 @@ const noUpstreamGit: GitProxy = {
   },
 };
 
+const unmergedGit: GitProxy = {
+  ...dirtyGit,
+  async statusPorcelain() {
+    return [
+      "# branch.oid abcdef1234567890",
+      "# branch.head main",
+      "# branch.upstream origin/main",
+      "# branch.ab +0 -0",
+      "1 M. N... 100644 100644 100644 abcdef1234567890 abcdef1234567890 workflows/foreign-jv-china-watch/src/agent02-adapter.mjs",
+      "u UU N... 100644 100644 100644 100644 base ours theirs workflows/foreign-jv-china-watch/data/latest_card_payload.json",
+    ].join("\n");
+  },
+};
+
 describe("GitControlService", () => {
   test("returns dashboard scan data plus card-ready action models", async () => {
     const service = createGitControlService({
@@ -159,6 +173,18 @@ describe("GitControlService", () => {
       ahead: 1,
       behind: 0,
       selfMutation: true,
+    });
+  });
+
+  test("blocks commit prepare when the repo has unmerged conflict files", async () => {
+    const service = createGitControlService({
+      git: unmergedGit,
+      manifest,
+      nowMs: () => 2_000,
+    });
+
+    await expect(service.prepareMutation("agent08-gitboard", "commit")).rejects.toMatchObject({
+      code: "UNMERGED_BLOCKS_COMMIT",
     });
   });
 

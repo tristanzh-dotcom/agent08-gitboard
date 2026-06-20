@@ -280,6 +280,41 @@ describe("git control HTTP server", () => {
     });
   });
 
+  test("productizes unmerged commit safety errors before confirmation", async () => {
+    const service: GitControlHttpService = {
+      async scan() {
+        return {};
+      },
+      async repoDetail() {
+        return {};
+      },
+      async mutationStatus() {
+        return {};
+      },
+      async prepareMutation() {
+        throw new MutationSafetyError("UNMERGED_BLOCKS_COMMIT");
+      },
+      async mutate() {
+        return {};
+      },
+    };
+
+    const response = await dispatchGitControlHttpRequest(service, {
+      method: "POST",
+      path: "/api/git-control/repos/agent02-pvi/commit/prepare",
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: {
+        code: "UNMERGED_BLOCKS_COMMIT",
+        title: "Commit blocked by unresolved conflicts",
+        summary: "The repository has unmerged conflict files, so Agent08 did not prepare a commit.",
+        suggestedAction: "Resolve the conflicts, rescan the repo, then retry commit.",
+      },
+    });
+  });
+
   test("productizes push-with-upstream safety errors", async () => {
     const service: GitControlHttpService = {
       async scan() {

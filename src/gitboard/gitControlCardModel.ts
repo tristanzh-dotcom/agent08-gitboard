@@ -144,6 +144,7 @@ function buildStatusLine(snapshot: RepoSnapshot): string {
 
 function buildBlockedReason(snapshot: RepoSnapshot, hasDirtyWorktree: boolean): string | null {
   if (snapshot.branch === null) return "detached HEAD";
+  if ((snapshot.dirty.unmerged?.length ?? 0) > 0) return "unresolved conflicts";
   if (snapshot.upstreamState === "orphaned_upstream") return "upstream unreachable";
   if (
     !hasDirtyWorktree &&
@@ -160,6 +161,7 @@ function countDirtyFiles(snapshot: RepoSnapshot): number {
     snapshot.dirty.modified.length +
     snapshot.dirty.untracked.length +
     snapshot.dirty.deleted.length +
-    snapshot.dirty.renamed.length
+    snapshot.dirty.renamed.length +
+    (snapshot.dirty.unmerged?.length ?? 0)
   );
 }

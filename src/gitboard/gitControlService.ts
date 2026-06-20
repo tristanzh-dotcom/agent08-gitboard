@@ -132,6 +132,9 @@ export function createGitControlService({
     const operation = assertMutationOperation(operationName);
     const target = findTarget(manifest, repoId);
     const [snapshot] = await scanner.scanAll({ ...manifest, targets: [target] });
+    if (operation === "commit" && hasUnmergedFiles(snapshot)) {
+      throw new MutationSafetyError("UNMERGED_BLOCKS_COMMIT");
+    }
     const operationId = randomUUID();
     await snapshotStore.savePreflightSnapshot(toPreflightSnapshot(operationId, operation, snapshot, now()));
     const token = safetyGate.createConfirmationToken({
@@ -306,6 +309,7 @@ function toPreflightSnapshot(
       untracked: [...snapshot.dirty.untracked],
       deleted: [...snapshot.dirty.deleted],
       renamed: [...snapshot.dirty.renamed],
+      unmerged: [...(snapshot.dirty.unmerged ?? [])],
     },
     lastCommitSha: snapshot.lastCommit.sha,
     worktreeState: snapshot.branch ? (hasDirtyFiles(snapshot) ? "dirty" : "clean") : "detached",
@@ -344,9 +348,14 @@ function hasDirtyFiles(snapshot: RepoSnapshot): boolean {
     snapshot.dirty.modified.length +
       snapshot.dirty.untracked.length +
       snapshot.dirty.deleted.length +
-      snapshot.dirty.renamed.length >
+      snapshot.dirty.renamed.length +
+      (snapshot.dirty.unmerged?.length ?? 0) >
     0
   );
+}
+
+function hasUnmergedFiles(snapshot: RepoSnapshot): boolean {
+  return (snapshot.dirty.unmerged?.length ?? 0) > 0;
 }
 
 function requireString(value: unknown, name: string): string {

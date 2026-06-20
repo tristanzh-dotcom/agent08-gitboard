@@ -66,6 +66,7 @@ function parseStatusPorcelain(status) {
         untracked: [],
         deleted: [],
         renamed: [],
+        unmerged: [],
         stashCount: 0,
         largeFiles: []
     };
@@ -111,6 +112,12 @@ function parseStatusPorcelain(status) {
             if (tabIndex >= 0) {
                 dirty.renamed.push(line.slice(tabIndex + 1));
             }
+            continue;
+        }
+        if (line.startsWith("u ")) {
+            const filePath = line.split(" ").slice(10).join(" ");
+            if (filePath)
+                dirty.unmerged.push(filePath);
         }
     }
     return { branch, upstream, ahead, behind, dirty };
@@ -164,6 +171,7 @@ function missingRepoSnapshot(target) {
             untracked: [],
             deleted: [],
             renamed: [],
+            unmerged: [],
             stashCount: 0,
             largeFiles: []
         },

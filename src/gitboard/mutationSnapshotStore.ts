@@ -21,6 +21,7 @@ export interface MutationPreflightSnapshot {
     untracked: string[];
     deleted: string[];
     renamed: string[];
+    unmerged?: string[];
   };
   lastCommitSha: string | null;
   worktreeState: string;
@@ -86,6 +87,7 @@ function sanitizePreflight(input: MutationPreflightSnapshot): MutationPreflightS
       untracked: [...input.dirty.untracked],
       deleted: [...input.dirty.deleted],
       renamed: [...input.dirty.renamed],
+      unmerged: [...(input.dirty.unmerged ?? [])],
     },
     lastCommitSha: input.lastCommitSha,
     worktreeState: input.worktreeState,

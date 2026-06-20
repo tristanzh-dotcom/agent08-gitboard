@@ -117,6 +117,35 @@ describe("RepoScanner M2 dirty data scan", () => {
     expect(snapshot.dirty.renamed).toEqual(["workflows/new name.ts"]);
   });
 
+  test("reports porcelain v2 unmerged rows as conflicted dirty files", async () => {
+    const unmergedGit: GitProxy = {
+      async statusPorcelain(_repoPath) {
+        return [
+          "# branch.head main",
+          "u UU N... 100644 100644 100644 100644 base ours theirs workflows/foreign-jv-china-watch/data/latest_card_payload.json"
+        ].join("\n");
+      },
+      async lastCommit(_repoPath) {
+        return "1234567|chore: restore repo split stash changes|2026-06-18T14:00:00.000Z";
+      },
+      async diffStat(_repoPath) {
+        return "1 file changed, 12 insertions(+), 3 deletions(-)";
+      },
+      async stashList(_repoPath) {
+        return "";
+      },
+      async listLargeFiles(_repoPath, _thresholdBytes) {
+        return [];
+      }
+    };
+
+    const [snapshot] = await new RepoScanner(unmergedGit).scanAll(manifest);
+
+    expect(snapshot.dirty.unmerged).toEqual([
+      "workflows/foreign-jv-china-watch/data/latest_card_payload.json"
+    ]);
+  });
+
   test("returns exists:false when git cannot acquire a stale index lock", async () => {
     const lockedGit: GitProxy = {
       async statusPorcelain(_repoPath) {
