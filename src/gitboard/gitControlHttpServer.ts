@@ -93,6 +93,13 @@ async function dispatchGitControlHttpRequestUnsafe(
     return { status: 200, body: { ok: true, agentId: "agent08", service: "git-control" } };
   }
 
+  if (request.method === "GET" && url.pathname === "/api/git-control/health") {
+    return {
+      status: 200,
+      body: { ok: true, agentId: "agent08", service: "agent08-git-control", status: "ok" },
+    };
+  }
+
   const backendMatch = url.pathname.match(/^\/api\/git-control\/backend\/([^/]+)\/(start|restart)$/);
   if (request.method === "POST" && backendMatch) {
     const agentId = decodeURIComponent(backendMatch[1]);

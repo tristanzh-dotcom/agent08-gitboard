@@ -43,6 +43,12 @@ describe("git control HTTP server", () => {
       agentId: "agent08",
       service: "git-control",
     });
+    await expectJson(service, "GET", "/api/git-control/health", 200, {
+      ok: true,
+      agentId: "agent08",
+      service: "agent08-git-control",
+      status: "ok",
+    });
   });
 
   test("routes mutation prepare and execute requests through the injected service", async () => {
