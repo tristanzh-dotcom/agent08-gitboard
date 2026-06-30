@@ -78,6 +78,21 @@ describe("ScoreEngine M3 health scoring", () => {
     expect(score.reasons).toContain("large files over 1MB");
   });
 
+  test("does not treat historical stashes as working tree dirt", () => {
+    const stashedSnapshot: RepoSnapshot = {
+      ...baseSnapshot,
+      dirty: {
+        ...baseSnapshot.dirty,
+        stashCount: 1
+      }
+    };
+
+    const score = ScoreEngine.score(stashedSnapshot, new Date("2026-06-18T15:00:00.000Z"));
+
+    expect(score.cleanliness).toBe(40);
+    expect(score.reasons).not.toContain("dirty working tree");
+  });
+
   test("penalizes stale commits older than 14 days", () => {
     const staleSnapshot: RepoSnapshot = {
       ...baseSnapshot,

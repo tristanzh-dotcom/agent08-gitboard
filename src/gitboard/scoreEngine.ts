@@ -26,8 +26,7 @@ function scoreCleanliness(snapshot: RepoSnapshot, reasons: string[]): number {
     snapshot.dirty.untracked.length +
     snapshot.dirty.deleted.length +
     snapshot.dirty.renamed.length +
-    (snapshot.dirty.unmerged?.length ?? 0) +
-    snapshot.dirty.stashCount;
+    (snapshot.dirty.unmerged?.length ?? 0);
 
   if (dirtyCount === 0) return 40;
 
