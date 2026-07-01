@@ -1,4 +1,4 @@
-import type { LargeFile } from "./types.js";
+import type { LargeFile, RemoteBranchState } from "./types.js";
 
 export interface GitProxy {
   statusPorcelain(repoPath: string): Promise<string>;
@@ -6,6 +6,7 @@ export interface GitProxy {
   diffStat(repoPath: string): Promise<string>;
   stashList(repoPath: string): Promise<string>;
   listLargeFiles(repoPath: string, thresholdBytes: number): Promise<LargeFile[]>;
+  remoteBranchState?(repoPath: string, branch: string): Promise<RemoteBranchState>;
   remoteHasBranch?(repoPath: string, branch: string): Promise<boolean>;
   commitsToPushSubjects?(repoPath: string, branch: string, remoteHasBranch: boolean): Promise<string[]>;
 }

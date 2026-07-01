@@ -120,6 +120,10 @@ function buildStatusLine(snapshot: RepoSnapshot): string {
     return `${snapshot.branch} · upstream unreachable`;
   }
 
+  if (snapshot.upstreamState === "remote_check_failed") {
+    return `${snapshot.branch} · remote check failed`;
+  }
+
   if (
     snapshot.upstreamState === "missing_upstream_remote_exists" ||
     snapshot.upstreamState === "missing_upstream_remote_missing"
@@ -160,7 +164,7 @@ function countDirtyFiles(snapshot: RepoSnapshot): number {
   return (
     snapshot.dirty.modified.length +
     snapshot.dirty.untracked.length +
-    snapshot.dirty.deleted.length +
+    snapshot.dirty.deleted.filter((path) => !/^HANDOVER_[^/]+\.md$/.test(path)).length +
     snapshot.dirty.renamed.length +
     (snapshot.dirty.unmerged?.length ?? 0)
   );

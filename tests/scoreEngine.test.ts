@@ -93,6 +93,39 @@ describe("ScoreEngine M3 health scoring", () => {
     expect(score.reasons).not.toContain("dirty working tree");
   });
 
+  test("does not penalize root handover markdown deletions as working tree dirt", () => {
+    const housekeepingSnapshot: RepoSnapshot = {
+      ...baseSnapshot,
+      dirty: {
+        ...baseSnapshot.dirty,
+        deleted: [
+          "HANDOVER_agent05_pptmaker_20260604.md",
+          "HANDOVER_agent05_web_service_control_20260617.md"
+        ]
+      }
+    };
+
+    const score = ScoreEngine.score(housekeepingSnapshot, new Date("2026-06-18T15:00:00.000Z"));
+
+    expect(score.cleanliness).toBe(40);
+    expect(score.reasons).not.toContain("dirty working tree");
+  });
+
+  test("penalizes non-handover markdown deletions as working tree dirt", () => {
+    const dirtySnapshot: RepoSnapshot = {
+      ...baseSnapshot,
+      dirty: {
+        ...baseSnapshot.dirty,
+        deleted: ["README.md", "docs/HANDOVER_agent05_pptmaker_20260604.md"]
+      }
+    };
+
+    const score = ScoreEngine.score(dirtySnapshot, new Date("2026-06-18T15:00:00.000Z"));
+
+    expect(score.cleanliness).toBe(20);
+    expect(score.reasons).toContain("dirty working tree");
+  });
+
   test("penalizes stale commits older than 14 days", () => {
     const staleSnapshot: RepoSnapshot = {
       ...baseSnapshot,

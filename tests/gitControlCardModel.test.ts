@@ -55,6 +55,40 @@ describe("Git Control card model", () => {
     expect(card.dirtyLine).toBe("2 dirty");
   });
 
+  test("root handover markdown deletions do not count as operational dirty", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        dirty: {
+          ...snapshot().dirty,
+          deleted: [
+            "HANDOVER_agent05_pptmaker_20260604.md",
+            "HANDOVER_agent05_web_service_control_20260617.md",
+          ],
+        },
+      }),
+    );
+
+    expect(card.dirtyLine).toBe("clean");
+    expect(card.actions).toEqual([]);
+  });
+
+  test("handover markdown changes outside root deletion still count as operational dirty", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        dirty: {
+          ...snapshot().dirty,
+          modified: ["HANDOVER_agent05_pptmaker_20260604.md"],
+          deleted: ["docs/HANDOVER_agent05_pptmaker_20260604.md"],
+        },
+      }),
+    );
+
+    expect(card.dirtyLine).toBe("2 dirty");
+    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["commit", true]]);
+  });
+
   test("clean ahead repo shows push", async () => {
     const { buildGitControlCardModel } = await cardModels();
     const card = buildGitControlCardModel(snapshot({ ahead: 2 }));
@@ -187,6 +221,22 @@ describe("Git Control card model", () => {
     expect(card.statusLine).toBe("main · upstream unreachable");
     expect(card.actions).toEqual([]);
     expect(card.blockedReason).toBe("upstream unreachable");
+  });
+
+  test("remote check failures do not block local commit workflow", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        upstream: "origin/main",
+        remoteHasBranch: false,
+        upstreamState: "remote_check_failed",
+        dirty: { ...snapshot().dirty, modified: ["workflows/mantou-dog/mcht_app.py"] },
+      }),
+    );
+
+    expect(card.statusLine).toBe("main · remote check failed");
+    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["commit", true]]);
+    expect(card.blockedReason).toBeNull();
   });
 });
 

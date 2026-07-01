@@ -3,6 +3,8 @@ export interface LargeFile {
   bytes: number;
 }
 
+export type RemoteBranchState = "exists" | "missing" | "unknown";
+
 export interface RepoManifestEntry {
   id: string;
   agent: string | null;
@@ -34,6 +36,7 @@ export interface RepoSnapshot {
     | "orphaned_upstream"
     | "missing_upstream_remote_exists"
     | "missing_upstream_remote_missing"
+    | "remote_check_failed"
     | "detached"
     | "unknown";
   ahead: number;

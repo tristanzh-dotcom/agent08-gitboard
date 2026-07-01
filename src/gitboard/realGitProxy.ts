@@ -3,7 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { GitProxy } from "./gitProxy.js";
-import type { LargeFile } from "./types.js";
+import type { LargeFile, RemoteBranchState } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -46,11 +46,15 @@ export class RealGitProxy implements GitProxy {
   }
 
   async remoteHasBranch(repoPath: string, branch: string): Promise<boolean> {
+    return (await this.remoteBranchState(repoPath, branch)) === "exists";
+  }
+
+  async remoteBranchState(repoPath: string, branch: string): Promise<RemoteBranchState> {
     try {
       const output = await runReadOnlyGit(repoPath, ["ls-remote", "--heads", "origin", branch], 5_000);
-      return output.trim().length > 0;
+      return output.trim().length > 0 ? "exists" : "missing";
     } catch (_error) {
-      return false;
+      return "unknown";
     }
   }
 

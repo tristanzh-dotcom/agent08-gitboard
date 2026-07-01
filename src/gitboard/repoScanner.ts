@@ -1,5 +1,5 @@
 import type { GitProxy } from "./gitProxy.js";
-import type { RepoManifest, RepoManifestEntry, RepoSnapshot } from "./types.js";
+import type { RemoteBranchState, RepoManifest, RepoManifestEntry, RepoSnapshot } from "./types.js";
 
 export class RepoScanner {
   constructor(private readonly git: GitProxy) {}
@@ -22,16 +22,16 @@ export class RepoScanner {
       const parsedCommit = parseLastCommit(lastCommit);
       const branch = normalizeBranch(parsedStatus.branch);
       const remoteTrackingBranch = branch ? `origin/${branch}` : null;
-      const remoteHasBranch =
-        branch && this.git.remoteHasBranch ? await this.git.remoteHasBranch(target.path, branch) : false;
+      const remoteBranchState = branch ? await this.remoteBranchState(target.path, branch) : "unknown";
+      const remoteHasBranch = remoteBranchState === "exists";
       const commitsToPushSubjects =
-        branch && this.git.commitsToPushSubjects
+        branch && remoteBranchState !== "unknown" && this.git.commitsToPushSubjects
           ? (await this.git.commitsToPushSubjects(target.path, branch, remoteHasBranch)).slice(0, 5)
           : [];
       const upstreamState = determineUpstreamState({
         branch,
         upstream: parsedStatus.upstream,
-        remoteHasBranch
+        remoteBranchState
       });
 
       return {
@@ -63,6 +63,12 @@ export class RepoScanner {
       }
       throw error;
     }
+  }
+
+  private async remoteBranchState(repoPath: string, branch: string): Promise<RemoteBranchState> {
+    if (this.git.remoteBranchState) return this.git.remoteBranchState(repoPath, branch);
+    if (this.git.remoteHasBranch) return (await this.git.remoteHasBranch(repoPath, branch)) ? "exists" : "missing";
+    return "unknown";
   }
 }
 
@@ -205,13 +211,14 @@ function normalizeBranch(branch: string | null): string | null {
 function determineUpstreamState(input: {
   branch: string | null;
   upstream: string | null;
-  remoteHasBranch: boolean;
+  remoteBranchState: RemoteBranchState;
 }): RepoSnapshot["upstreamState"] {
   if (!input.branch) return "detached";
-  if (input.upstream && input.remoteHasBranch) return "tracked";
-  if (input.upstream && !input.remoteHasBranch) return "orphaned_upstream";
-  if (!input.upstream && input.remoteHasBranch) return "missing_upstream_remote_exists";
-  if (!input.upstream && !input.remoteHasBranch) return "missing_upstream_remote_missing";
+  if (input.remoteBranchState === "unknown") return "remote_check_failed";
+  if (input.upstream && input.remoteBranchState === "exists") return "tracked";
+  if (input.upstream && input.remoteBranchState === "missing") return "orphaned_upstream";
+  if (!input.upstream && input.remoteBranchState === "exists") return "missing_upstream_remote_exists";
+  if (!input.upstream && input.remoteBranchState === "missing") return "missing_upstream_remote_missing";
   return "unknown";
 }
 

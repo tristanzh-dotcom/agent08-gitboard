@@ -102,6 +102,41 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
     });
   });
 
+  test("marks remote probe failures separately from missing upstream branches", async () => {
+    const git = {
+      ...fakeGit,
+      async statusPorcelain(_repoPath: string) {
+        return [
+          "# branch.head main",
+          "# branch.upstream origin/main",
+          "# branch.ab +0 -0",
+          "1 .M N... 100644 100644 100644 abcdef1234567890 abcdef1234567890 workflows/mantou-dog/mcht_app.py"
+        ].join("\n");
+      },
+      async remoteBranchState(_repoPath: string, branch: string) {
+        expect(branch).toBe("main");
+        return "unknown" as const;
+      },
+      async commitsToPushSubjects(_repoPath: string, _branch: string, remoteHasBranch: boolean) {
+        expect(remoteHasBranch).toBe(false);
+        return [];
+      }
+    } as unknown as GitProxy;
+    const scanner = new RepoScanner(git);
+
+    const [snapshot] = await scanner.scanAll(createDefaultManifest("/Users/tristanzh/agent"));
+
+    expect(snapshot).toMatchObject({
+      upstream: "origin/main",
+      remoteTrackingBranch: "origin/main",
+      remoteHasBranch: false,
+      upstreamState: "remote_check_failed",
+      dirty: {
+        modified: ["workflows/mantou-dog/mcht_app.py"]
+      }
+    });
+  });
+
   test("reports no commits to publish when upstream and remote branch are missing", async () => {
     const git = {
       ...fakeGit,
