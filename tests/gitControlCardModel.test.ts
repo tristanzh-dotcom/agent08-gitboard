@@ -11,6 +11,7 @@ function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
     path: "/Users/tristanzh/agent/agent02-pvi",
     remote: "https://github.com/tristanzh-dotcom/agent02-pvi.git",
     exists: true,
+    initializable: false,
     branch: "main",
     upstream: "origin/main",
     remoteTrackingBranch: "origin/main",
@@ -36,6 +37,63 @@ function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
 }
 
 describe("Git Control card model", () => {
+  test("existing non-Git directories expose only local repository initialization", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        id: "agent11-fishtank-monitor",
+        path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+        remote: "",
+        exists: false,
+        initializable: true,
+        branch: null,
+        upstream: null,
+        upstreamState: "unknown",
+      }),
+    );
+
+    expect(card).toMatchObject({
+      blockedReason: null,
+      statusLine: "local directory · Git not initialized",
+      actions: [{ id: "init_repository", enabled: true }],
+    });
+  });
+
+  test("Agent12 exposes origin configuration for an initialized local repository", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        id: "agent12-fishtank-3dtwin",
+        path: "/Users/tristanzh/agent/agent12-fishtank-3Dtwin",
+        remote: "https://github.com/tristanzh-dotcom/agent12-fishtank-3dtwin.git",
+        upstream: null,
+        remoteTrackingBranch: "origin/main",
+        remoteHasBranch: false,
+        upstreamState: "remote_check_failed",
+      }),
+    );
+
+    expect(card.actions).toEqual([{ id: "configure_origin", enabled: true }]);
+  });
+
+  test("Agent12 exposes bootstrap push after origin configuration", async () => {
+    const { buildGitControlCardModel } = await cardModels();
+    const card = buildGitControlCardModel(
+      snapshot({
+        id: "agent12-fishtank-3dtwin",
+        path: "/Users/tristanzh/agent/agent12-fishtank-3Dtwin",
+        remote: "https://github.com/tristanzh-dotcom/agent12-fishtank-3dtwin.git",
+        upstream: null,
+        remoteTrackingBranch: "origin/main",
+        remoteHasBranch: false,
+        upstreamState: "missing_upstream_remote_missing",
+        commitsToPushCount: 1,
+      }),
+    );
+
+    expect(card.actions).toEqual([{ id: "bootstrap_push", enabled: true }]);
+  });
+
   test("clean synced repo shows no mutation buttons", async () => {
     const { buildGitControlCardModel } = await cardModels();
     const card = buildGitControlCardModel(snapshot());

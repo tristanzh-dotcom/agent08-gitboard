@@ -41,6 +41,71 @@ describe("Agent08 v1.1 GitProxy boundaries", () => {
     ]);
   });
 
+  test("mutation proxy initializes a repository with fixed local-only arguments", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        return "Initialized empty Git repository";
+      },
+    });
+
+    await proxy.initRepository({ repoPath: "/tmp/agent11-fishtank-monitor" });
+
+    expect(calls).toEqual([["init", "--initial-branch=main"]]);
+  });
+
+  test("mutation proxy configures origin only once from a typed HTTPS URL", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        if (args.join(" ") === "remote get-url origin") throw new Error("origin missing");
+        return "";
+      },
+    });
+
+    await proxy.configureOrigin({
+      repoPath: "/tmp/agent11-fishtank-monitor",
+      remoteUrl: "https://github.com/tristanzh-dotcom/agent11-fishtank-monitor.git",
+    });
+
+    expect(calls).toEqual([
+      ["remote", "get-url", "origin"],
+      ["remote", "add", "origin", "https://github.com/tristanzh-dotcom/agent11-fishtank-monitor.git"],
+    ]);
+  });
+
+  test("mutation proxy rejects pre-existing origin and unsafe origin URLs", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const existing = new MutationGitProxy({ runGit: async () => "https://github.com/example/existing.git" });
+    await expect(
+      existing.configureOrigin({ repoPath: "/tmp/repo", remoteUrl: "https://github.com/tristanzh-dotcom/repo.git" }),
+    ).rejects.toThrow(/ORIGIN_ALREADY_CONFIGURED/);
+
+    const missing = new MutationGitProxy({ runGit: async () => { throw new Error("origin missing"); } });
+    await expect(missing.configureOrigin({ repoPath: "/tmp/repo", remoteUrl: "git@github.com:owner/repo.git" })).rejects.toThrow(
+      /unsafe origin URL/,
+    );
+  });
+
+  test("mutation proxy bootstraps upstream with the fixed origin and branch only", async () => {
+    const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
+    const calls: string[][] = [];
+    const proxy = new MutationGitProxy({
+      async runGit(_repoPath, args) {
+        calls.push(args);
+        return "";
+      },
+    });
+
+    await proxy.bootstrapPush({ repoPath: "/tmp/repo", branch: "main", remote: "origin" });
+
+    expect(calls).toEqual([["push", "-u", "origin", "main"]]);
+  });
+
   test("mutation proxy blocks dependency and runtime paths before git add", async () => {
     const { MutationGitProxy } = await import("../src/gitboard/mutationGitProxy.js");
     const calls: string[][] = [];

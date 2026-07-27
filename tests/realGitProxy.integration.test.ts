@@ -66,6 +66,67 @@ describe("RealGitProxy integration", () => {
     await expect(new RealGitProxy().diffStat(repo)).resolves.toBe("");
   });
 
+  test("scans an initialized repo with no commits so first commit can be prepared", async () => {
+    const repo = await createEmptyTempRepo("agent10-empty");
+    await writeFile(join(repo, "README.md"), "# agent10-empty\n");
+    const manifest: RepoManifest = {
+      version: 1,
+      root: tmpdir(),
+      generatedAt: "2026-07-04T00:00:00.000Z",
+      targets: [
+        {
+          id: "agent10-asset-library",
+          agent: "Agent10",
+          label: "Asset Library",
+          path: repo,
+          remote: "local-agent10",
+          visibility: "local",
+          required: true
+        }
+      ]
+    };
+
+    const [snapshot] = await new RepoScanner(new RealGitProxy()).scanAll(manifest);
+
+    expect(snapshot).toMatchObject({
+      id: "agent10-asset-library",
+      exists: true,
+      branch: "main",
+      lastCommit: { sha: null, subject: null, authorDate: null }
+    });
+    expect(snapshot.dirty.untracked).toEqual(["README.md"]);
+  });
+
+  test("preserves UTF-8 untracked paths for a later commit mutation", async () => {
+    const repo = await createTempRepo("agent10-utf8-path", "main", "test: initialize UTF-8 path fixture");
+    const file = "validation/obsidian-test-vault/未命名.base";
+    await mkdir(join(repo, "validation", "obsidian-test-vault"), { recursive: true });
+    await writeFile(join(repo, "validation", "obsidian-test-vault", ".gitkeep"), "\n");
+    await execGit(repo, ["add", "validation/obsidian-test-vault/.gitkeep"]);
+    await execGit(repo, ["commit", "-m", "test: track UTF-8 path parent"]);
+    await writeFile(join(repo, file), "{}\n");
+    const manifest: RepoManifest = {
+      version: 1,
+      root: tmpdir(),
+      generatedAt: "2026-07-16T00:00:00.000Z",
+      targets: [
+        {
+          id: "agent10-asset-library",
+          agent: "Agent10",
+          label: "Asset Library",
+          path: repo,
+          remote: "local-agent10",
+          visibility: "local",
+          required: true,
+        },
+      ],
+    };
+
+    const [snapshot] = await new RepoScanner(new RealGitProxy()).scanAll(manifest);
+
+    expect(snapshot.dirty.untracked).toEqual([file]);
+  });
+
   test("large file scan ignores archive and cache directories", async () => {
     const repo = await createTempRepo("agent08-large-files", "main", "test: initialize large scan");
     await mkdir(join(repo, "_archive"), { recursive: true });

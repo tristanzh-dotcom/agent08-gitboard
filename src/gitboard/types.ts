@@ -27,6 +27,7 @@ export interface RepoSnapshot {
   path: string;
   remote: string;
   exists: boolean;
+  initializable: boolean;
   branch: string | null;
   upstream: string | null;
   remoteTrackingBranch: string | null;

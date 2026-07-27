@@ -81,6 +81,33 @@ export function createDefaultManifest(root: string): RepoManifest {
         required: true
       },
       {
+        id: "agent10-asset-library",
+        agent: "Agent10",
+        label: "Asset Library",
+        path: `${base}/agent10-asset-library`,
+        remote: "https://github.com/tristanzh-dotcom/agent10-asset-library.git",
+        visibility: "public",
+        required: true
+      },
+      {
+        id: "agent11-fishtank-monitor",
+        agent: "Agent11",
+        label: "Fishtank Monitor",
+        path: `${base}/agent11-fishtank-monitor`,
+        remote: "https://github.com/tristanzh-dotcom/agent11-fishtank-monitor.git",
+        visibility: "private",
+        required: true
+      },
+      {
+        id: "agent12-fishtank-3dtwin",
+        agent: "Agent12",
+        label: "Fishtank 3D Twin",
+        path: `${base}/agent12-fishtank-3Dtwin`,
+        remote: "https://github.com/tristanzh-dotcom/agent12-fishtank-3dtwin.git",
+        visibility: "private",
+        required: true
+      },
+      {
         id: "web-platform",
         agent: null,
         label: "Shared Publishing Surface",

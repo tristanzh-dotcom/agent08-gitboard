@@ -83,6 +83,14 @@ export class MutationSafetyGate {
   assertCanMutate(input: AssertCanMutateInput): void {
     this.#assertRepoAllowed(input.repoId, input.repoPath);
     this.#consumeValidToken(input);
+    if (input.operation === "init_repository") {
+      if (!input.currentSnapshot.exists && input.currentSnapshot.initializable) return;
+      throw new MutationSafetyError("REPOSITORY_INIT_NOT_ALLOWED");
+    }
+    if (input.operation === "configure_origin") {
+      this.#assertCanConfigureOrigin(input.currentSnapshot);
+      return;
+    }
     if (input.mergeInProgress || input.rebaseInProgress) throw new MutationSafetyError("MERGE_OR_REBASE_IN_PROGRESS");
     if (!input.currentSnapshot.branch) throw new MutationSafetyError("DETACHED_HEAD_BLOCKS_MUTATION");
     if (input.operation === "commit" && hasUnmergedFiles(input.currentSnapshot)) {
@@ -93,6 +101,7 @@ export class MutationSafetyGate {
     if (input.operation === "push") this.#assertCanPush(input.currentSnapshot);
     if (input.operation === "set_upstream") this.#assertCanSetUpstream(input.currentSnapshot);
     if (input.operation === "push_with_upstream") this.#assertCanPushWithUpstream(input.currentSnapshot);
+    if (input.operation === "bootstrap_push") this.#assertCanBootstrapPush(input.currentSnapshot);
   }
 
   #assertRepoAllowed(repoId: string, repoPath: string): void {
@@ -139,6 +148,19 @@ export class MutationSafetyGate {
     assertSafeBranch(snapshot.branch);
   }
 
+  #assertCanConfigureOrigin(snapshot: RepoSnapshot): void {
+    if (!snapshot.exists || !snapshot.branch) throw new MutationSafetyError("ORIGIN_CONFIGURATION_NOT_ALLOWED");
+    if (!isHttpsGitHubRemote(snapshot.remote)) throw new MutationSafetyError("ORIGIN_CONFIGURATION_NOT_ALLOWED");
+  }
+
+  #assertCanBootstrapPush(snapshot: RepoSnapshot): void {
+    if (!isHttpsGitHubRemote(snapshot.remote)) throw new MutationSafetyError("BOOTSTRAP_PUSH_NOT_ALLOWED");
+    if (snapshot.upstream) throw new MutationSafetyError("UPSTREAM_ALREADY_SET");
+    if (snapshot.upstreamState !== "missing_upstream_remote_missing") throw new MutationSafetyError("BOOTSTRAP_PUSH_NOT_ALLOWED");
+    if (snapshot.remoteHasBranch || snapshot.commitsToPushCount < 1) throw new MutationSafetyError("BOOTSTRAP_PUSH_NOT_ALLOWED");
+    assertSafeBranch(snapshot.branch);
+  }
+
   #assertCanPushWithUpstream(snapshot: RepoSnapshot): void {
     if (hasDirtyFiles(snapshot)) throw new MutationSafetyError("DIRTY_BLOCKS_PUSH_WITH_UPSTREAM");
     if (snapshot.upstream) throw new MutationSafetyError("UPSTREAM_ALREADY_SET");
@@ -162,6 +184,10 @@ function hasDirtyFiles(snapshot: RepoSnapshot): boolean {
       (snapshot.dirty.unmerged?.length ?? 0) >
     0
   );
+}
+
+function isHttpsGitHubRemote(remote: string): boolean {
+  return /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(remote);
 }
 
 function hasUnmergedFiles(snapshot: RepoSnapshot): boolean {

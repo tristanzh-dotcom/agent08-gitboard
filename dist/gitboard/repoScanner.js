@@ -1,7 +1,20 @@
+import { stat } from "node:fs/promises";
+const realRepoPathProbe = {
+    async exists(path) {
+        try {
+            return (await stat(path)).isDirectory();
+        }
+        catch {
+            return false;
+        }
+    },
+};
 export class RepoScanner {
     git;
-    constructor(git) {
+    pathProbe;
+    constructor(git, pathProbe = realRepoPathProbe) {
         this.git = git;
+        this.pathProbe = pathProbe;
     }
     async scanAll(manifest) {
         return Promise.all(manifest.targets.map((target) => this.scanOne(target)));
@@ -19,20 +32,22 @@ export class RepoScanner {
             const parsedCommit = parseLastCommit(lastCommit);
             const branch = normalizeBranch(parsedStatus.branch);
             const remoteTrackingBranch = branch ? `origin/${branch}` : null;
-            const remoteHasBranch = branch && this.git.remoteHasBranch ? await this.git.remoteHasBranch(target.path, branch) : false;
-            const commitsToPushSubjects = branch && this.git.commitsToPushSubjects
+            const remoteBranchState = branch ? await this.remoteBranchState(target.path, branch) : "unknown";
+            const remoteHasBranch = remoteBranchState === "exists";
+            const commitsToPushSubjects = branch && remoteBranchState !== "unknown" && this.git.commitsToPushSubjects
                 ? (await this.git.commitsToPushSubjects(target.path, branch, remoteHasBranch)).slice(0, 5)
                 : [];
             const upstreamState = determineUpstreamState({
                 branch,
                 upstream: parsedStatus.upstream,
-                remoteHasBranch
+                remoteBranchState
             });
             return {
                 id: target.id,
                 path: target.path,
                 remote: target.remote,
                 exists: true,
+                initializable: false,
                 branch,
                 upstream: parsedStatus.upstream,
                 remoteTrackingBranch,
@@ -53,11 +68,21 @@ export class RepoScanner {
             };
         }
         catch (error) {
+            if (isNotGitRepositoryError(error)) {
+                return missingRepoSnapshot(target, await this.pathProbe.exists(target.path));
+            }
             if (isMissingRepoError(error)) {
                 return missingRepoSnapshot(target);
             }
             throw error;
         }
+    }
+    async remoteBranchState(repoPath, branch) {
+        if (this.git.remoteBranchState)
+            return this.git.remoteBranchState(repoPath, branch);
+        if (this.git.remoteHasBranch)
+            return (await this.git.remoteHasBranch(repoPath, branch)) ? "exists" : "missing";
+        return "unknown";
     }
 }
 function parseStatusPorcelain(status) {
@@ -74,7 +99,8 @@ function parseStatusPorcelain(status) {
     let upstream = null;
     let ahead = 0;
     let behind = 0;
-    for (const line of status.split("\n").filter(Boolean)) {
+    const records = status.includes("\0") ? status.split("\0") : status.split("\n");
+    for (const line of records.filter(Boolean)) {
         if (line.startsWith("# branch.head ")) {
             branch = line.slice("# branch.head ".length);
             continue;
@@ -109,9 +135,9 @@ function parseStatusPorcelain(status) {
         }
         if (line.startsWith("2 ")) {
             const tabIndex = line.indexOf("\t");
-            if (tabIndex >= 0) {
-                dirty.renamed.push(line.slice(tabIndex + 1));
-            }
+            const filePath = tabIndex >= 0 ? line.slice(tabIndex + 1) : line.split(" ").slice(9).join(" ");
+            if (filePath)
+                dirty.renamed.push(filePath);
             continue;
         }
         if (line.startsWith("u ")) {
@@ -150,12 +176,16 @@ function isMissingRepoError(error) {
     return (error instanceof Error &&
         /ENOENT|not a git repository|No such file|index\.lock|cannot read|Unable to read current working directory/i.test(error.message));
 }
-function missingRepoSnapshot(target) {
+function isNotGitRepositoryError(error) {
+    return error instanceof Error && /not a git repository/i.test(error.message);
+}
+function missingRepoSnapshot(target, initializable = false) {
     return {
         id: target.id,
         path: target.path,
         remote: target.remote,
         exists: false,
+        initializable,
         branch: null,
         upstream: null,
         remoteTrackingBranch: null,
@@ -187,13 +217,15 @@ function normalizeBranch(branch) {
 function determineUpstreamState(input) {
     if (!input.branch)
         return "detached";
-    if (input.upstream && input.remoteHasBranch)
+    if (input.remoteBranchState === "unknown")
+        return "remote_check_failed";
+    if (input.upstream && input.remoteBranchState === "exists")
         return "tracked";
-    if (input.upstream && !input.remoteHasBranch)
+    if (input.upstream && input.remoteBranchState === "missing")
         return "orphaned_upstream";
-    if (!input.upstream && input.remoteHasBranch)
+    if (!input.upstream && input.remoteBranchState === "exists")
         return "missing_upstream_remote_exists";
-    if (!input.upstream && !input.remoteHasBranch)
+    if (!input.upstream && input.remoteBranchState === "missing")
         return "missing_upstream_remote_missing";
     return "unknown";
 }

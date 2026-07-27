@@ -18,7 +18,7 @@ export class ScoreEngine {
 function scoreCleanliness(snapshot, reasons) {
     const dirtyCount = snapshot.dirty.modified.length +
         snapshot.dirty.untracked.length +
-        snapshot.dirty.deleted.length +
+        snapshot.dirty.deleted.filter((path) => !/^HANDOVER_[^/]+\.md$/.test(path)).length +
         snapshot.dirty.renamed.length +
         (snapshot.dirty.unmerged?.length ?? 0);
     if (dirtyCount === 0)

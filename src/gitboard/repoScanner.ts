@@ -1,8 +1,26 @@
+import { stat } from "node:fs/promises";
 import type { GitProxy } from "./gitProxy.js";
 import type { RemoteBranchState, RepoManifest, RepoManifestEntry, RepoSnapshot } from "./types.js";
 
+export interface RepoPathProbe {
+  exists(path: string): Promise<boolean>;
+}
+
+const realRepoPathProbe: RepoPathProbe = {
+  async exists(path) {
+    try {
+      return (await stat(path)).isDirectory();
+    } catch {
+      return false;
+    }
+  },
+};
+
 export class RepoScanner {
-  constructor(private readonly git: GitProxy) {}
+  constructor(
+    private readonly git: GitProxy,
+    private readonly pathProbe: RepoPathProbe = realRepoPathProbe,
+  ) {}
 
   async scanAll(manifest: RepoManifest): Promise<RepoSnapshot[]> {
     return Promise.all(manifest.targets.map((target) => this.scanOne(target)));
@@ -39,6 +57,7 @@ export class RepoScanner {
         path: target.path,
         remote: target.remote,
         exists: true,
+        initializable: false,
         branch,
         upstream: parsedStatus.upstream,
         remoteTrackingBranch,
@@ -58,6 +77,9 @@ export class RepoScanner {
         healthScore: emptyHealthScore()
       };
     } catch (error) {
+      if (isNotGitRepositoryError(error)) {
+        return missingRepoSnapshot(target, await this.pathProbe.exists(target.path));
+      }
       if (isMissingRepoError(error)) {
         return missingRepoSnapshot(target);
       }
@@ -90,7 +112,8 @@ function parseStatusPorcelain(status: string): Pick<
   let ahead = 0;
   let behind = 0;
 
-  for (const line of status.split("\n").filter(Boolean)) {
+  const records = status.includes("\0") ? status.split("\0") : status.split("\n");
+  for (const line of records.filter(Boolean)) {
     if (line.startsWith("# branch.head ")) {
       branch = line.slice("# branch.head ".length);
       continue;
@@ -122,9 +145,8 @@ function parseStatusPorcelain(status: string): Pick<
     }
     if (line.startsWith("2 ")) {
       const tabIndex = line.indexOf("\t");
-      if (tabIndex >= 0) {
-        dirty.renamed.push(line.slice(tabIndex + 1));
-      }
+      const filePath = tabIndex >= 0 ? line.slice(tabIndex + 1) : line.split(" ").slice(9).join(" ");
+      if (filePath) dirty.renamed.push(filePath);
       continue;
     }
     if (line.startsWith("u ")) {
@@ -173,12 +195,17 @@ function isMissingRepoError(error: unknown): boolean {
   );
 }
 
-function missingRepoSnapshot(target: RepoManifestEntry): RepoSnapshot {
+function isNotGitRepositoryError(error: unknown): boolean {
+  return error instanceof Error && /not a git repository/i.test(error.message);
+}
+
+function missingRepoSnapshot(target: RepoManifestEntry, initializable = false): RepoSnapshot {
   return {
     id: target.id,
     path: target.path,
     remote: target.remote,
     exists: false,
+    initializable,
     branch: null,
     upstream: null,
     remoteTrackingBranch: null,

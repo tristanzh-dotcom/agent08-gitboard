@@ -172,6 +172,9 @@ export function createDefaultBackendProcessRegistry(agentRoot = "/Users/tristanz
         args: ["-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "8086"],
         env: {
           PYTHONUNBUFFERED: "1",
+          AGENT10_BASE_URL: process.env.AGENT10_BASE_URL ?? "http://127.0.0.1:8010",
+          AGENT10_CONTROL_TOKEN_FILE:
+            process.env.AGENT10_CONTROL_TOKEN_FILE ?? "/Users/tristanzh/agent/AgentAssetVault/99_System/audit/.agent10-control.token",
         },
       },
     ],

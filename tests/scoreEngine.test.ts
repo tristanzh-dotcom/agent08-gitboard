@@ -7,6 +7,7 @@ const baseSnapshot: RepoSnapshot = {
   path: "/Users/tristanzh/agent/agent-tooling",
   remote: "https://github.com/tristanzh-dotcom/agent-tooling.git",
   exists: true,
+  initializable: false,
   branch: "main",
   upstream: "origin/main",
   remoteTrackingBranch: "origin/main",

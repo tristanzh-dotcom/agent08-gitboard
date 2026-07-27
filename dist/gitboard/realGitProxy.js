@@ -18,10 +18,18 @@ const IGNORED_DIRS = new Set([
 ]);
 export class RealGitProxy {
     async statusPorcelain(repoPath) {
-        return runReadOnlyGit(repoPath, ["status", "--porcelain=v2", "--branch"]);
+        return runReadOnlyGit(repoPath, ["status", "--porcelain=v2", "--branch", "-z"]);
     }
     async lastCommit(repoPath) {
-        return runReadOnlyGit(repoPath, ["log", "-1", "--format=%h|%s|%aI"]);
+        try {
+            return await runReadOnlyGit(repoPath, ["log", "-1", "--format=%h|%s|%aI"]);
+        }
+        catch (error) {
+            if (error instanceof Error && /does not have any commits yet|no commits yet/i.test(error.message)) {
+                return "";
+            }
+            throw error;
+        }
     }
     async diffStat(repoPath) {
         try {
@@ -38,12 +46,15 @@ export class RealGitProxy {
         return runReadOnlyGit(repoPath, ["stash", "list"]);
     }
     async remoteHasBranch(repoPath, branch) {
+        return (await this.remoteBranchState(repoPath, branch)) === "exists";
+    }
+    async remoteBranchState(repoPath, branch) {
         try {
             const output = await runReadOnlyGit(repoPath, ["ls-remote", "--heads", "origin", branch], 5_000);
-            return output.trim().length > 0;
+            return output.trim().length > 0 ? "exists" : "missing";
         }
         catch (_error) {
-            return false;
+            return "unknown";
         }
     }
     async commitsToPushSubjects(repoPath, branch, remoteHasBranch) {

@@ -27,6 +27,21 @@ v1.2.1 closes that gap at the mutation service boundary. UI hints are insufficie
 - web-platform-owned Git logic;
 - branch switching or tag operations.
 
+## 2.1 Local Repository Initialization
+
+`init_repository` is a separate local-only Agent08 mutation for a manifest-listed
+project directory that exists but is not yet a Git repository.
+
+Rules:
+
+- it requires a fresh preflight snapshot and a matching one-time confirmation token;
+- it is eligible only when the rescan reports `exists: false` and `initializable: true`;
+- the mutation proxy uses the fixed command `git init --initial-branch=main`;
+- it must not create a remote, configure `origin`, create a commit, or push;
+- after success, Agent08 must rescan before offering normal commit or remote-related actions;
+- a missing directory or an already initialized repository returns the typed
+  `REPOSITORY_INIT_NOT_ALLOWED` safety error before any Git command runs.
+
 ## 3. Commit Path Policy
 
 The commit operation must reject any selected file path that is absolute, path-traversing, or under a blocked generated/runtime/dependency directory.

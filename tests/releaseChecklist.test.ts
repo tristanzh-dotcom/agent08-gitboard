@@ -7,6 +7,7 @@ const cleanSnapshot: RepoSnapshot = {
   path: "/Users/tristanzh/agent/agent08-gitboard",
   remote: "https://github.com/tristanzh-dotcom/agent08-gitboard.git",
   exists: true,
+  initializable: false,
   branch: "main",
   upstream: "origin/main",
   remoteTrackingBranch: "origin/main",

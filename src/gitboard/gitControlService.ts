@@ -173,7 +173,7 @@ export function createGitControlService({
       currentSnapshot: snapshot,
     });
     await snapshotStore.savePreflightSnapshot(toPreflightSnapshot(preflightSnapshotId, operation, snapshot, now()));
-    const output = await runMutation(operation, snapshot, body);
+    const output = await runMutation(operation, target, snapshot, body);
     return {
       ok: true,
       operationId: body.operationId ?? preflightSnapshotId,
@@ -197,6 +197,7 @@ export function createGitControlService({
 
   async function runMutation(
     operation: MutationGitOperation,
+    target: RepoManifestEntry,
     snapshot: RepoSnapshot,
     body: GitControlMutationRequest,
   ): Promise<string> {
@@ -232,6 +233,26 @@ export function createGitControlService({
     }
     if (operation === "push_with_upstream") {
       return mutationProxy.pushWithUpstream({
+        repoPath: snapshot.path,
+        branch: requireString(snapshot.branch, "branch"),
+        remote: "origin",
+      });
+    }
+    if (operation === "init_repository") {
+      return mutationProxy.initRepository({ repoPath: snapshot.path });
+    }
+    if (operation === "configure_origin") {
+      try {
+        return await mutationProxy.configureOrigin({ repoPath: snapshot.path, remoteUrl: target.remote });
+      } catch (error) {
+        if (error instanceof Error && error.message === "ORIGIN_ALREADY_CONFIGURED") {
+          throw new MutationSafetyError("ORIGIN_ALREADY_CONFIGURED");
+        }
+        throw error;
+      }
+    }
+    if (operation === "bootstrap_push") {
+      return mutationProxy.bootstrapPush({
         repoPath: snapshot.path,
         branch: requireString(snapshot.branch, "branch"),
         remote: "origin",
@@ -276,7 +297,10 @@ function assertMutationOperation(operation: string): MutationGitOperation {
     operation === "rebase" ||
     operation === "stash_rebase" ||
     operation === "set_upstream" ||
-    operation === "push_with_upstream"
+    operation === "push_with_upstream" ||
+    operation === "init_repository" ||
+    operation === "configure_origin" ||
+    operation === "bootstrap_push"
   ) {
     return operation;
   }
@@ -312,7 +336,11 @@ function toPreflightSnapshot(
       unmerged: [...(snapshot.dirty.unmerged ?? [])],
     },
     lastCommitSha: snapshot.lastCommit.sha,
-    worktreeState: snapshot.branch ? (hasDirtyFiles(snapshot) ? "dirty" : "clean") : "detached",
+    worktreeState: snapshot.initializable
+      ? "initializable"
+      : snapshot.branch
+        ? (hasDirtyFiles(snapshot) ? "dirty" : "clean")
+        : "detached",
   };
 }
 
@@ -320,6 +348,28 @@ function prepareMutationDetails(
   operation: MutationGitOperation,
   snapshot: RepoSnapshot,
 ): Partial<GitControlPrepareResponse> {
+  if (operation === "init_repository") {
+    return {
+      warning: "This initializes a local Git repository only. It does not create a remote, push, or commit files.",
+    };
+  }
+  if (operation === "configure_origin") {
+    return {
+      remote: "origin",
+      warning: "This configures the manifest-defined origin URL only. It does not stage, commit, or push files.",
+    };
+  }
+  if (operation === "bootstrap_push") {
+    return {
+      branch: snapshot.branch,
+      remote: "origin",
+      remoteTrackingBranch: snapshot.remoteTrackingBranch,
+      currentUpstream: snapshot.upstream,
+      ahead: snapshot.commitsToPushCount,
+      commitsToPushSubjects: [...snapshot.commitsToPushSubjects],
+      warning: "This bootstrap push publishes existing commits only. It does not stage or commit dirty working-tree files.",
+    };
+  }
   if (operation === "set_upstream") {
     return {
       branch: snapshot.branch,

@@ -23,11 +23,18 @@ const IGNORED_DIRS = new Set([
 
 export class RealGitProxy implements GitProxy {
   async statusPorcelain(repoPath: string): Promise<string> {
-    return runReadOnlyGit(repoPath, ["status", "--porcelain=v2", "--branch"]);
+    return runReadOnlyGit(repoPath, ["status", "--porcelain=v2", "--branch", "-z"]);
   }
 
   async lastCommit(repoPath: string): Promise<string> {
-    return runReadOnlyGit(repoPath, ["log", "-1", "--format=%h|%s|%aI"]);
+    try {
+      return await runReadOnlyGit(repoPath, ["log", "-1", "--format=%h|%s|%aI"]);
+    } catch (error) {
+      if (error instanceof Error && /does not have any commits yet|no commits yet/i.test(error.message)) {
+        return "";
+      }
+      throw error;
+    }
   }
 
   async diffStat(repoPath: string): Promise<string> {

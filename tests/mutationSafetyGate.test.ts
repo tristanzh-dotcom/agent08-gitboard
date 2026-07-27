@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { RepoSnapshot } from "../src/gitboard/types.js";
 
 const allowedRepos = new Map([["agent02-pvi", "/Users/tristanzh/agent/agent02-pvi"]]);
+allowedRepos.set("agent11-fishtank-monitor", "/Users/tristanzh/agent/agent11-fishtank-monitor");
 
 function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
   return {
@@ -9,6 +10,7 @@ function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
     path: "/Users/tristanzh/agent/agent02-pvi",
     remote: "https://github.com/tristanzh-dotcom/agent02-pvi.git",
     exists: true,
+    initializable: false,
     branch: "main",
     upstream: "origin/main",
     remoteTrackingBranch: "origin/main",
@@ -40,11 +42,19 @@ async function gate(nowMs: number | (() => number) = 0) {
 
 function tokenFor(
   safetyGate: any,
-  operation: "commit" | "push" | "pull_ff_only" | "stash_rebase" | "set_upstream" | "push_with_upstream",
+  operation:
+    | "commit"
+    | "push"
+    | "pull_ff_only"
+    | "stash_rebase"
+    | "set_upstream"
+    | "push_with_upstream"
+    | "init_repository",
   preflightSnapshotId = "snap-1",
+  repoId = "agent02-pvi",
 ): string {
   return safetyGate.createConfirmationToken({
-    repoId: "agent02-pvi",
+    repoId,
     operation,
     preflightSnapshotId,
     operationId: "op-1",
@@ -62,6 +72,67 @@ function upstreamMutationRequest(operation: "set_upstream" | "push_with_upstream
 }
 
 describe("MutationSafetyGate", () => {
+  test("allows initialization only for an allowlisted existing non-Git directory", async () => {
+    const safetyGate = await gate();
+    const currentSnapshot = snapshot({
+      id: "agent11-fishtank-monitor",
+      path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+      remote: "",
+      exists: false,
+      initializable: true,
+      branch: null,
+      upstream: null,
+      upstreamState: "unknown",
+    });
+    const confirmationToken = tokenFor(safetyGate, "init_repository", "snap-1", "agent11-fishtank-monitor");
+
+    expect(() =>
+      safetyGate.assertCanMutate({
+        repoId: "agent11-fishtank-monitor",
+        repoPath: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+        operation: "init_repository",
+        preflightSnapshotId: "snap-1",
+        confirmationToken,
+        currentSnapshot,
+      }),
+    ).not.toThrow();
+  });
+
+  test("blocks initialization when the directory is missing or already a repository", async () => {
+    for (const currentSnapshot of [
+      snapshot({
+        id: "agent11-fishtank-monitor",
+        path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+        remote: "",
+        exists: false,
+        initializable: false,
+        branch: null,
+        upstream: null,
+      }),
+      snapshot({
+        id: "agent11-fishtank-monitor",
+        path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+        remote: "",
+        exists: true,
+        initializable: false,
+      }),
+    ]) {
+      const safetyGate = await gate();
+      const confirmationToken = tokenFor(safetyGate, "init_repository", "snap-1", "agent11-fishtank-monitor");
+
+      expect(() =>
+        safetyGate.assertCanMutate({
+          repoId: "agent11-fishtank-monitor",
+          repoPath: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+          operation: "init_repository",
+          preflightSnapshotId: "snap-1",
+          confirmationToken,
+          currentSnapshot,
+        }),
+      ).toThrow(/REPOSITORY_INIT_NOT_ALLOWED/);
+    }
+  });
+
   test("blocks repos outside the allowlist", async () => {
     const safetyGate = await gate();
     const confirmationToken = tokenFor(safetyGate, "commit");

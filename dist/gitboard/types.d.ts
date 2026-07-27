@@ -2,6 +2,7 @@ export interface LargeFile {
     path: string;
     bytes: number;
 }
+export type RemoteBranchState = "exists" | "missing" | "unknown";
 export interface RepoManifestEntry {
     id: string;
     agent: string | null;
@@ -22,11 +23,12 @@ export interface RepoSnapshot {
     path: string;
     remote: string;
     exists: boolean;
+    initializable: boolean;
     branch: string | null;
     upstream: string | null;
     remoteTrackingBranch: string | null;
     remoteHasBranch: boolean;
-    upstreamState: "tracked" | "orphaned_upstream" | "missing_upstream_remote_exists" | "missing_upstream_remote_missing" | "detached" | "unknown";
+    upstreamState: "tracked" | "orphaned_upstream" | "missing_upstream_remote_exists" | "missing_upstream_remote_missing" | "remote_check_failed" | "detached" | "unknown";
     ahead: number;
     behind: number;
     commitsToPushCount: number;

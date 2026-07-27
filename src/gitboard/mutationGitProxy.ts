@@ -6,7 +6,10 @@ export type MutationGitOperation =
   | "rebase"
   | "stash_rebase"
   | "set_upstream"
-  | "push_with_upstream";
+  | "push_with_upstream"
+  | "init_repository"
+  | "configure_origin"
+  | "bootstrap_push";
 
 export interface MutationGitRunner {
   runGit(repoPath: string, args: string[]): Promise<string>;
@@ -21,6 +24,10 @@ export interface CommitMutationInput {
 
 export interface RepoPathMutationInput {
   repoPath: string;
+}
+
+export interface ConfigureOriginMutationInput extends RepoPathMutationInput {
+  remoteUrl: string;
 }
 
 export interface UpstreamMutationInput {
@@ -44,6 +51,9 @@ const ALLOWED_MUTATION_OPERATIONS = new Set<MutationGitOperation>([
   "stash_rebase",
   "set_upstream",
   "push_with_upstream",
+  "init_repository",
+  "configure_origin",
+  "bootstrap_push",
 ]);
 
 const FORBIDDEN_ARGS = new Set(["--force", "--force-with-lease", "reset", "clean", "checkout", "branch", "-D", "pop", "apply"]);
@@ -116,6 +126,26 @@ export class MutationGitProxy {
   }
 
   async pushWithUpstream(input: UpstreamMutationInput): Promise<string> {
+    assertOriginRemote(input.remote);
+    assertBranch(input.branch);
+    return this.#runner.runGit(input.repoPath, ["push", "-u", input.remote, input.branch]);
+  }
+
+  async initRepository(input: RepoPathMutationInput): Promise<string> {
+    return this.#runner.runGit(input.repoPath, ["init", "--initial-branch=main"]);
+  }
+
+  async configureOrigin(input: ConfigureOriginMutationInput): Promise<string> {
+    assertHttpsOriginUrl(input.remoteUrl);
+    try {
+      await this.#runner.runGit(input.repoPath, ["remote", "get-url", "origin"]);
+    } catch {
+      return this.#runner.runGit(input.repoPath, ["remote", "add", "origin", input.remoteUrl]);
+    }
+    throw new Error("ORIGIN_ALREADY_CONFIGURED");
+  }
+
+  async bootstrapPush(input: UpstreamMutationInput): Promise<string> {
     assertOriginRemote(input.remote);
     assertBranch(input.branch);
     return this.#runner.runGit(input.repoPath, ["push", "-u", input.remote, input.branch]);
@@ -197,5 +227,11 @@ function assertBranch(branch: string): void {
 function assertOriginRemote(remote: string): asserts remote is "origin" {
   if (remote !== "origin") {
     throw new Error(`unsupported remote: ${remote}`);
+  }
+}
+
+function assertHttpsOriginUrl(remoteUrl: string): void {
+  if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(remoteUrl)) {
+    throw new Error("unsafe origin URL");
   }
 }

@@ -26,7 +26,7 @@ const cleanGit: GitProxy = {
 };
 
 describe("dashboard service web adapter", () => {
-  test("returns 9 repo scan payloads with scored health and release checklist summaries", async () => {
+  test("returns 12 repo scan payloads with scored health and release checklist summaries", async () => {
     const service = createDashboardService({
       root: "/Users/tristanzh/agent",
       git: cleanGit,
@@ -42,16 +42,19 @@ describe("dashboard service web adapter", () => {
       route: "/agent08",
       generated_at: "2026-06-18T16:00:00.000Z",
       summary: {
-        total: 9,
-        ready: 9,
+        total: 12,
+        ready: 12,
         blocked: 0,
         warnings: 0,
         missing: 0,
         average_health: 100
       }
     });
-    expect(scan.targets).toHaveLength(9);
+    expect(scan.targets).toHaveLength(12);
     expect(scan.targets.map((target) => target.id)).toContain("agent08-gitboard");
+    expect(scan.targets.map((target) => target.id)).toContain("agent10-asset-library");
+    expect(scan.targets.map((target) => target.id)).toContain("agent11-fishtank-monitor");
+    expect(scan.targets.map((target) => target.id)).toContain("agent12-fishtank-3dtwin");
     expect(scan.targets[0].health).toEqual({
       total: 100,
       cleanliness: 40,
@@ -62,8 +65,8 @@ describe("dashboard service web adapter", () => {
     });
 
     expect(checklist.summary).toEqual({
-      total: 9,
-      ready: 9,
+      total: 12,
+      ready: 12,
       blocked: 0,
       warnings: 0
     });

@@ -68,6 +68,16 @@ describe("BackendProcessManager", () => {
     expect(result).toEqual({ agentId: "agent06", status: "stopped", pid: 8086, port: 8086 });
   });
 
+  test("starts Agent06 with the configured Agent10 producer runtime contract", () => {
+    const spec = createDefaultBackendProcessRegistry("/Users/tristanzh/agent").get("agent06");
+
+    expect(spec?.env).toMatchObject({
+      PYTHONUNBUFFERED: "1",
+      AGENT10_BASE_URL: "http://127.0.0.1:8010",
+      AGENT10_CONTROL_TOKEN_FILE: "/Users/tristanzh/agent/AgentAssetVault/99_System/audit/.agent10-control.token",
+    });
+  });
+
   test("starts the Agent05 PPT Maker backend with its explicit FastAPI command", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "agent08-backend-state-"));
     const calls: unknown[] = [];

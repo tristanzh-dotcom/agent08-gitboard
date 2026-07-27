@@ -1,6 +1,15 @@
 import type { RepoSnapshot } from "./types.js";
 
-export type GitControlActionId = "commit" | "push" | "pull" | "stash+rebase" | "set-upstream" | "push-upstream";
+export type GitControlActionId =
+  | "commit"
+  | "push"
+  | "pull"
+  | "stash+rebase"
+  | "set-upstream"
+  | "push-upstream"
+  | "init_repository"
+  | "configure_origin"
+  | "bootstrap_push";
 
 export interface GitControlAction {
   id: GitControlActionId;
@@ -36,6 +45,16 @@ export function buildGitControlCardModel(
   snapshot: RepoSnapshot,
   options: GitControlCardOptions = {},
 ): GitControlCardModel {
+  if (snapshot.initializable) {
+    return {
+      actions: [{ id: "init_repository", enabled: true }],
+      blockedReason: null,
+      dirtyLine: "not initialized",
+      selfMutationWarning: null,
+      stashLine: null,
+      statusLine: "local directory · Git not initialized",
+    };
+  }
   const dirtyFileCount = countDirtyFiles(snapshot);
   const hasDirtyWorktree = dirtyFileCount > 0;
   const blockedReason = buildBlockedReason(snapshot, hasDirtyWorktree);
@@ -72,6 +91,24 @@ function buildActions(
   hasDirtyWorktree: boolean,
   options: GitControlCardOptions,
 ): GitControlAction[] {
+  if (
+    (snapshot.id === "agent11-fishtank-monitor" || snapshot.id === "agent12-fishtank-3dtwin") &&
+    snapshot.upstreamState === "remote_check_failed" &&
+    snapshot.remote.startsWith("https://github.com/")
+  ) {
+    return [{ id: "configure_origin", enabled: true }];
+  }
+
+  if (
+    (snapshot.id === "agent11-fishtank-monitor" || snapshot.id === "agent12-fishtank-3dtwin") &&
+    snapshot.upstreamState === "missing_upstream_remote_missing" &&
+    !snapshot.upstream &&
+    !snapshot.remoteHasBranch &&
+    snapshot.commitsToPushCount > 0
+  ) {
+    return [{ id: "bootstrap_push", enabled: true }];
+  }
+
   if (!hasDirtyWorktree && snapshot.upstreamState === "missing_upstream_remote_exists") {
     if (snapshot.commitsToPushCount > 0) return [{ id: "push-upstream", enabled: true }];
     return [{ id: "set-upstream", enabled: true }];

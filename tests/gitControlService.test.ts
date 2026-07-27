@@ -24,6 +24,23 @@ const manifest: RepoManifest = {
   ],
 };
 
+const agent11Manifest: RepoManifest = {
+  version: 1,
+  root: "/Users/tristanzh/agent",
+  generatedAt: "2026-07-16T00:00:00.000Z",
+  targets: [
+    {
+      id: "agent11-fishtank-monitor",
+      agent: "Agent11",
+      label: "Fishtank Monitor",
+      path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+      remote: "",
+      visibility: "local",
+      required: true,
+    },
+  ],
+};
+
 const dirtyGit: GitProxy = {
   async statusPorcelain() {
     return [
@@ -95,7 +112,58 @@ const unmergedGit: GitProxy = {
   },
 };
 
+const nonGitDirectory: GitProxy = {
+  async statusPorcelain() {
+    throw new Error("fatal: not a git repository (or any of the parent directories): .git");
+  },
+  async lastCommit() {
+    return "";
+  },
+  async diffStat() {
+    return "";
+  },
+  async stashList() {
+    return "";
+  },
+  async listLargeFiles() {
+    return [];
+  },
+};
+
 describe("GitControlService", () => {
+  test("prepares and executes local-only Agent11 repository initialization", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agent08-agent11-init-"));
+    const calls: string[][] = [];
+    const service = createGitControlService({
+      root,
+      git: nonGitDirectory,
+      manifest: agent11Manifest,
+      mutationProxy: new MutationGitProxy({
+        async runGit(_repoPath, args) {
+          calls.push(args);
+          return "Initialized empty Git repository";
+        },
+      }),
+      now: () => new Date("2026-07-16T00:00:00.000Z"),
+      nowMs: () => 1_000,
+    });
+
+    const prepared = await service.prepareMutation("agent11-fishtank-monitor", "init_repository");
+    const result = await service.mutate("agent11-fishtank-monitor", "init_repository", {
+      operationId: prepared.operationId,
+      preflightSnapshotId: prepared.preflightSnapshotId,
+      confirmationToken: prepared.confirmationToken,
+    });
+
+    expect(prepared).toMatchObject({
+      repoId: "agent11-fishtank-monitor",
+      operation: "init_repository",
+      warning: "This initializes a local Git repository only. It does not create a remote, push, or commit files.",
+    });
+    expect(result).toMatchObject({ ok: true, operation: "init_repository" });
+    expect(calls).toEqual([["init", "--initial-branch=main"]]);
+  });
+
   test("returns dashboard scan data plus card-ready action models", async () => {
     const service = createGitControlService({
       git: dirtyGit,

@@ -34,6 +34,9 @@ const MUTATION_ROUTE_TO_OPERATION = new Map<string, string>([
   ["stash-rebase", "stash_rebase"],
   ["set-upstream", "set_upstream"],
   ["push-upstream", "push_with_upstream"],
+  ["init", "init_repository"],
+  ["configure-origin", "configure_origin"],
+  ["bootstrap-push", "bootstrap_push"],
 ]);
 
 export function createGitControlHttpServer(options: GitControlHttpServerOptions): Server {
@@ -96,7 +99,7 @@ async function dispatchGitControlHttpRequestUnsafe(
   if (request.method === "GET" && url.pathname === "/api/git-control/health") {
     return {
       status: 200,
-      body: { ok: true, agentId: "agent08", service: "agent08-git-control", status: "ok" },
+      body: { ok: true, agentId: "agent08", service: "agent08-gitboard", status: "ok" },
     };
   }
 
@@ -215,6 +218,13 @@ function mutationSafetyErrorDetails(code: string): {
   summary: string;
   suggestedAction: string;
 } {
+  if (code === "REPOSITORY_INIT_NOT_ALLOWED") {
+    return {
+      title: "Repository initialization unavailable",
+      summary: "The selected directory is not eligible for local Git initialization.",
+      suggestedAction: "Rescan the directory and use initialization only before it becomes a Git repository.",
+    };
+  }
   if (code === "DIRTY_BLOCKS_PUSH") {
     return {
       title: "Push blocked by local changes",

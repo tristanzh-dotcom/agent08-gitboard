@@ -27,14 +27,36 @@ const fakeGit: GitProxy = {
 };
 
 describe("RepoScanner M1 multi-repo dashboard scan", () => {
-  test("scans all 9 manifest targets including self-monitoring agent08", async () => {
+  test("scans all 12 manifest targets including Agent11 and Agent12 fishtank projects", async () => {
     const manifest = createDefaultManifest("/Users/tristanzh/agent");
     const scanner = new RepoScanner(fakeGit);
 
     const snapshots = await scanner.scanAll(manifest);
 
-    expect(snapshots).toHaveLength(9);
+    expect(snapshots).toHaveLength(12);
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent08-gitboard");
+    expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent10-asset-library");
+    expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent11-fishtank-monitor");
+    expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent12-fishtank-3dtwin");
+    expect(manifest.targets).toContainEqual(
+      expect.objectContaining({
+        id: "agent11-fishtank-monitor",
+        agent: "Agent11",
+        path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+        remote: "https://github.com/tristanzh-dotcom/agent11-fishtank-monitor.git",
+        visibility: "private",
+      }),
+    );
+    expect(manifest.targets).toContainEqual(
+      expect.objectContaining({
+        id: "agent12-fishtank-3dtwin",
+        agent: "Agent12",
+        label: "Fishtank 3D Twin",
+        path: "/Users/tristanzh/agent/agent12-fishtank-3Dtwin",
+        remote: "https://github.com/tristanzh-dotcom/agent12-fishtank-3dtwin.git",
+        visibility: "private",
+      }),
+    );
     expect(snapshots[0]).toMatchObject({
       branch: "main",
       upstream: "origin/main",
@@ -45,6 +67,51 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
         subject: "docs: restore repo split state",
         authorDate: "2026-06-18T15:00:00.000Z"
       }
+    });
+  });
+
+  test("marks an existing non-Git directory as initializable", async () => {
+    const nonGitDirectory: GitProxy = {
+      async statusPorcelain() {
+        throw new Error("fatal: not a git repository (or any of the parent directories): .git");
+      },
+      async lastCommit() {
+        return "";
+      },
+      async diffStat() {
+        return "";
+      },
+      async stashList() {
+        return "";
+      },
+      async listLargeFiles() {
+        return [];
+      },
+    };
+    const scanner = new RepoScanner(nonGitDirectory, { exists: async () => true });
+    const [snapshot] = await scanner.scanAll({
+      version: 1,
+      root: "/Users/tristanzh/agent",
+      generatedAt: "2026-07-16T00:00:00.000Z",
+      targets: [
+        {
+          id: "agent11-fishtank-monitor",
+          agent: "Agent11",
+          label: "Fishtank Monitor",
+          path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
+          remote: "",
+          visibility: "local",
+          required: true,
+        },
+      ],
+    });
+
+    expect(snapshot).toMatchObject({
+      id: "agent11-fishtank-monitor",
+      exists: false,
+      initializable: true,
+      branch: null,
+      upstream: null,
     });
   });
 

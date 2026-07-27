@@ -46,7 +46,7 @@ describe("git control HTTP server", () => {
     await expectJson(service, "GET", "/api/git-control/health", 200, {
       ok: true,
       agentId: "agent08",
-      service: "agent08-git-control",
+      service: "agent08-gitboard",
       status: "ok",
     });
   });
@@ -102,6 +102,28 @@ describe("git control HTTP server", () => {
       { ok: true, repoId: "agent02-pvi", operation: "push_with_upstream" },
       { preflightSnapshotId: "snap-2", confirmationToken: "token-2", branch: "ignored" },
     );
+    await expectJson(
+      service,
+      "POST",
+      "/api/git-control/repos/agent11-fishtank-monitor/init/prepare",
+      200,
+      { repoId: "agent11-fishtank-monitor", operation: "init_repository", operationId: "op-prepare", confirmationToken: "token-1" },
+    );
+    await expectJson(
+      service,
+      "POST",
+      "/api/git-control/repos/agent11-fishtank-monitor/configure-origin/prepare",
+      200,
+      { repoId: "agent11-fishtank-monitor", operation: "configure_origin", operationId: "op-prepare", confirmationToken: "token-1" },
+    );
+    await expectJson(
+      service,
+      "POST",
+      "/api/git-control/repos/agent11-fishtank-monitor/bootstrap-push",
+      200,
+      { ok: true, repoId: "agent11-fishtank-monitor", operation: "bootstrap_push" },
+      { preflightSnapshotId: "snap-3", confirmationToken: "token-3" },
+    );
 
     expect(seen).toEqual([
       { repoId: "agent02-pvi", operation: "commit" },
@@ -115,6 +137,13 @@ describe("git control HTTP server", () => {
         repoId: "agent02-pvi",
         operation: "push_with_upstream",
         body: { preflightSnapshotId: "snap-2", confirmationToken: "token-2", branch: "ignored" },
+      },
+      { repoId: "agent11-fishtank-monitor", operation: "init_repository" },
+      { repoId: "agent11-fishtank-monitor", operation: "configure_origin" },
+      {
+        repoId: "agent11-fishtank-monitor",
+        operation: "bootstrap_push",
+        body: { preflightSnapshotId: "snap-3", confirmationToken: "token-3" },
       },
     ]);
   });
