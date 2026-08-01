@@ -5,6 +5,10 @@ Date: 2026-06-19
 Owner: Agent08 / agent08-gitboard
 Related baseline: `docs/sdd/git-status-board-v1.md`
 
+Forward reference: `docs/sdd/git-control-v1.3-local-isolation.md` defines the
+separately approved Phase A contract for machine-authorized local isolation. It
+does not retroactively approve or change this draft.
+
 ## 1. Purpose
 
 Agent08 v1.0.0 is a read-only Git status board. Its SDD explicitly excludes mutating Git operations, automated `push`/`commit`/branch actions, and any write into monitored repositories.
