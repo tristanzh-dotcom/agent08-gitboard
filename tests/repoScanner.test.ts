@@ -27,17 +27,18 @@ const fakeGit: GitProxy = {
 };
 
 describe("RepoScanner M1 multi-repo dashboard scan", () => {
-  test("scans all 12 manifest targets including Agent11 and Agent12 fishtank projects", async () => {
+  test("scans all 13 manifest targets including Agent11, Agent12, and Agent13 projects", async () => {
     const manifest = createDefaultManifest("/Users/tristanzh/agent");
     const scanner = new RepoScanner(fakeGit);
 
     const snapshots = await scanner.scanAll(manifest);
 
-    expect(snapshots).toHaveLength(12);
+    expect(snapshots).toHaveLength(13);
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent08-gitboard");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent10-asset-library");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent11-fishtank-monitor");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent12-fishtank-3dtwin");
+    expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent13-esp-reminder");
     expect(manifest.targets).toContainEqual(
       expect.objectContaining({
         id: "agent11-fishtank-monitor",
@@ -54,6 +55,16 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
         label: "Fishtank 3D Twin",
         path: "/Users/tristanzh/agent/agent12-fishtank-3Dtwin",
         remote: "https://github.com/tristanzh-dotcom/agent12-fishtank-3dtwin.git",
+        visibility: "private",
+      }),
+    );
+    expect(manifest.targets).toContainEqual(
+      expect.objectContaining({
+        id: "agent13-esp-reminder",
+        agent: "Agent13",
+        label: "ESP Reminder",
+        path: "/Users/tristanzh/agent/agent13-esp-reminder",
+        remote: "https://github.com/tristanzh-dotcom/agent13-esp-reminder.git",
         visibility: "private",
       }),
     );
