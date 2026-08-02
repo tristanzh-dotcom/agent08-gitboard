@@ -105,6 +105,15 @@ export function createDefaultManifest(root) {
                 required: true
             },
             {
+                id: "agent13-esp-reminder",
+                agent: "Agent13",
+                label: "ESP Reminder",
+                path: `${base}/agent13-esp-reminder`,
+                remote: "https://github.com/tristanzh-dotcom/agent13-esp-reminder.git",
+                visibility: "private",
+                required: true
+            },
+            {
                 id: "web-platform",
                 agent: null,
                 label: "Shared Publishing Surface",
