@@ -114,6 +114,15 @@ export function createDefaultManifest(root) {
                 required: true
             },
             {
+                id: "home-platform",
+                agent: null,
+                label: "Home Platform",
+                path: `${base}/home-platform`,
+                remote: "https://github.com/tristanzh-dotcom/home-platform.git",
+                visibility: "private",
+                required: true
+            },
+            {
                 id: "web-platform",
                 agent: null,
                 label: "Shared Publishing Surface",
