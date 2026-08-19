@@ -27,19 +27,20 @@ const fakeGit: GitProxy = {
 };
 
 describe("RepoScanner M1 multi-repo dashboard scan", () => {
-  test("scans all 14 manifest targets including Agent11, Agent12, Agent13, and home-platform projects", async () => {
+  test("scans all 15 manifest targets including Agent11, Agent12, Agent13, Agent14, and home-platform projects", async () => {
     const manifest = createDefaultManifest("/Users/tristanzh/agent");
     const scanner = new RepoScanner(fakeGit);
 
     const snapshots = await scanner.scanAll(manifest);
 
-    expect(snapshots).toHaveLength(14);
+    expect(snapshots).toHaveLength(15);
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent08-gitboard");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent10-asset-library");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent11-fishtank-monitor");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent12-fishtank-3dtwin");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent13-esp-reminder");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("home-platform");
+    expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent14-ppt2html");
     expect(manifest.targets).toContainEqual(
       expect.objectContaining({
         id: "agent11-fishtank-monitor",
@@ -76,6 +77,16 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
         label: "Home Platform",
         path: "/Users/tristanzh/agent/home-platform",
         remote: "https://github.com/tristanzh-dotcom/home-platform.git",
+        visibility: "private",
+      }),
+    );
+    expect(manifest.targets).toContainEqual(
+      expect.objectContaining({
+        id: "agent14-ppt2html",
+        agent: "Agent14",
+        label: "PPT/PDF to Editable HTML",
+        path: "/Users/tristanzh/agent/agent14-ppt2html",
+        remote: "https://github.com/tristanzh-dotcom/agent14-ppt2html.git",
         visibility: "private",
       }),
     );

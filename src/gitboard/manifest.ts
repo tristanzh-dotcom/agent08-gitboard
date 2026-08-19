@@ -126,6 +126,15 @@ export function createDefaultManifest(root: string): RepoManifest {
         required: true
       },
       {
+        id: "agent14-ppt2html",
+        agent: "Agent14",
+        label: "PPT/PDF to Editable HTML",
+        path: `${base}/agent14-ppt2html`,
+        remote: "https://github.com/tristanzh-dotcom/agent14-ppt2html.git",
+        visibility: "private",
+        required: true
+      },
+      {
         id: "web-platform",
         agent: null,
         label: "Shared Publishing Surface",
