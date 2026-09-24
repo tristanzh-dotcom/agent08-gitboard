@@ -1,12 +1,26 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { MutationSafetyError } from "./mutationSafetyGate.js";
+import {
+  FinalizationError,
+  type FinalizationPlan,
+  type FinalizationStatus,
+  type CommitProposal,
+  type FinalizationOutcome,
+  type PathSelectionDeclaration,
+  type ProposalSource,
+  type PublicFinalizationConfirmation,
+  type PublicFinalizationPlan,
+  type PublicFinalizationStatus,
+  type PushProposal,
+} from "./finalizationContracts.js";
 
 export interface GitControlHttpService {
   scan(): Promise<unknown>;
   repoDetail(repoId: string): Promise<unknown>;
-  mutationStatus(operationId: string): Promise<unknown>;
-  prepareMutation(repoId: string, operation: string): Promise<unknown>;
-  mutate(repoId: string, operation: string, body: Record<string, unknown>): Promise<unknown>;
+  prepareCommit(repoId: string, proposal: CommitProposal): Promise<unknown>;
+  preparePush(repoId: string, proposal?: PushProposal): Promise<unknown>;
+  confirmFinalization(operationId: string): Promise<unknown>;
+  executeFinalization(operationId: string, confirmationToken: string): Promise<unknown>;
+  finalizationStatus(operationId: string): Promise<unknown>;
   backendStart?(agentId: string): Promise<unknown>;
   backendRestart?(agentId: string): Promise<unknown>;
 }
@@ -26,18 +40,6 @@ export interface GitControlDispatchResponse {
   headers: Record<string, string>;
   body: unknown;
 }
-
-const MUTATION_ROUTE_TO_OPERATION = new Map<string, string>([
-  ["commit", "commit"],
-  ["push", "push"],
-  ["pull", "pull_ff_only"],
-  ["stash-rebase", "stash_rebase"],
-  ["set-upstream", "set_upstream"],
-  ["push-upstream", "push_with_upstream"],
-  ["init", "init_repository"],
-  ["configure-origin", "configure_origin"],
-  ["bootstrap-push", "bootstrap_push"],
-]);
 
 export function createGitControlHttpServer(options: GitControlHttpServerOptions): Server {
   return createServer(async (request, response) => {
@@ -67,11 +69,18 @@ export async function dispatchGitControlHttpRequest(
       body: body.body,
     };
   } catch (error) {
-    if (error instanceof MutationSafetyError) {
+    if (error instanceof FinalizationError) {
       return {
         status: 409,
         headers: { "content-type": "application/json; charset=utf-8" },
-        body: mutationSafetyErrorBody(error),
+        body: finalizationErrorBody(error),
+      };
+    }
+    if (isScanRequest(request)) {
+      return {
+        status: 503,
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: unverifiedScanBody(),
       };
     }
     return {
@@ -142,29 +151,58 @@ async function dispatchGitControlHttpRequestUnsafe(
     return { status: 200, body: await service.repoDetail(decodeURIComponent(repoDetailMatch[1])) };
   }
 
-  const mutationStatusMatch = url.pathname.match(/^\/api\/git-control\/mutations\/([^/]+)$/);
-  if (request.method === "GET" && mutationStatusMatch) {
-    return { status: 200, body: await service.mutationStatus(decodeURIComponent(mutationStatusMatch[1])) };
-  }
-
-  const prepareMatch = url.pathname.match(/^\/api\/git-control\/repos\/([^/]+)\/([^/]+)\/prepare$/);
-  if (request.method === "POST" && prepareMatch) {
-    const operation = MUTATION_ROUTE_TO_OPERATION.get(prepareMatch[2]);
-    if (!operation) {
-      return { status: 404, body: { error: { code: "NOT_FOUND" } } };
-    }
-    return { status: 200, body: await service.prepareMutation(decodeURIComponent(prepareMatch[1]), operation) };
-  }
-
-  const mutationMatch = url.pathname.match(/^\/api\/git-control\/repos\/([^/]+)\/([^/]+)$/);
-  if (request.method === "POST" && mutationMatch) {
-    const operation = MUTATION_ROUTE_TO_OPERATION.get(mutationMatch[2]);
-    if (!operation) {
-      return { status: 404, body: { error: { code: "NOT_FOUND" } } };
-    }
+  const finalizationStatusMatch = url.pathname.match(/^\/api\/git-control\/finalizations\/([^/]+)$/);
+  if (request.method === "GET" && finalizationStatusMatch) {
     return {
       status: 200,
-      body: await service.mutate(decodeURIComponent(mutationMatch[1]), operation, request.body ?? {}),
+      body: publicFinalizationStatus(await service.finalizationStatus(decodeURIComponent(finalizationStatusMatch[1]))),
+    };
+  }
+
+  const commitPrepareMatch = url.pathname.match(/^\/api\/git-control\/repos\/([^/]+)\/commit\/prepare$/);
+  if (request.method === "POST" && commitPrepareMatch) {
+    const plan = await service.prepareCommit(
+      decodeURIComponent(commitPrepareMatch[1]),
+      toCommitProposal(request.body ?? {}),
+    );
+    return {
+      status: 200,
+      body: publicFinalizationStatus(await service.finalizationStatus(requireOperationId(plan))),
+    };
+  }
+
+  const pushPrepareMatch = url.pathname.match(/^\/api\/git-control\/repos\/([^/]+)\/push\/prepare$/);
+  if (request.method === "POST" && pushPrepareMatch) {
+    const plan = await service.preparePush(
+      decodeURIComponent(pushPrepareMatch[1]),
+      toPushProposal(request.body ?? {}),
+    );
+    return {
+      status: 200,
+      body: publicFinalizationStatus(await service.finalizationStatus(requireOperationId(plan))),
+    };
+  }
+
+  const confirmMatch = url.pathname.match(/^\/api\/git-control\/finalizations\/([^/]+)\/confirm$/);
+  if (request.method === "POST" && confirmMatch) {
+    return {
+      status: 200,
+      body: publicFinalizationConfirmation(
+        await service.confirmFinalization(decodeURIComponent(confirmMatch[1])),
+      ),
+    };
+  }
+
+  const executeMatch = url.pathname.match(/^\/api\/git-control\/finalizations\/([^/]+)\/execute$/);
+  if (request.method === "POST" && executeMatch) {
+    const operationId = decodeURIComponent(executeMatch[1]);
+    await service.executeFinalization(
+      operationId,
+      requireBodyString(request.body ?? {}, "confirmationToken"),
+    );
+    return {
+      status: 200,
+      body: publicFinalizationStatus(await service.finalizationStatus(operationId)),
     };
   }
 
@@ -203,136 +241,252 @@ function serviceUnavailableBody(): unknown {
   };
 }
 
-function mutationSafetyErrorBody(error: MutationSafetyError): unknown {
-  const detail = mutationSafetyErrorDetails(error.code);
+function unverifiedScanBody(): unknown {
+  return {
+    schemaVersion: 2,
+    observation: {
+      state: "unverified",
+      observedAt: null,
+      reasonCode: "AGENT08_SCAN_FAILED",
+    },
+    repositories: [],
+  };
+}
+
+function finalizationErrorBody(error: FinalizationError): unknown {
+  const outcome = publicFinalizationOutcome(error.code);
   return {
     error: {
       code: error.code,
-      ...detail,
+      ...(error.operationId === undefined ? {} : { operationId: error.operationId }),
+      outcome,
+      ...publicFinalizationOutcomeCopy(outcome),
     },
   };
 }
 
-function mutationSafetyErrorDetails(code: string): {
+function publicFinalizationStatus(status: unknown): PublicFinalizationStatus {
+  const source = status as FinalizationStatus;
+  const resultCode = source.receipt?.resultCode ?? source.attempt.resultCode;
+  const outcome = source.receipt === null
+    ? source.attempt.outcome
+    : source.receipt.status === "succeeded"
+      ? source.receipt.operation === "commit" ? "committed" : "pushed"
+      : publicFinalizationOutcome(resultCode);
+  return {
+    schemaVersion: 2,
+    operationId: source.operationId,
+    state: source.status,
+    outcome,
+    resultCode,
+    attempt: {
+      operation: source.attempt.operation,
+      repoId: source.attempt.repoId,
+      proposalSource: source.attempt.proposalSource,
+      taskIntentId: source.attempt.taskIntentId ?? null,
+      createdAt: source.attempt.createdAt,
+      completedAt: source.attempt.completedAt,
+    },
+    plan: source.plan === null ? null : publicFinalizationPlan(source.plan),
+    receipt: source.receipt === null ? null : {
+      operation: source.receipt.operation,
+      repoId: source.receipt.repoId,
+      taskIntentId: source.receipt.taskIntentId ?? null,
+      state: source.receipt.status,
+      resultCode: source.receipt.resultCode,
+      beforeOid: source.receipt.beforeOid,
+      afterOid: source.receipt.afterOid,
+      branch: source.receipt.branch,
+      completedAt: source.receipt.completedAt,
+    },
+  };
+}
+
+function publicFinalizationPlan(plan: FinalizationPlan): PublicFinalizationPlan {
+  const display = {
+    repoId: plan.repoId,
+    branch: plan.branch,
+    expectedHead: plan.expectedHead,
+    proposalSource: plan.proposalSource,
+    taskIntentId: plan.taskIntentId ?? null,
+    createdAt: plan.createdAt,
+    expiresAt: plan.expiresAt,
+  };
+  if (plan.operation === "push") return { operation: "push", ...display };
+  return {
+    operation: "commit",
+    ...display,
+    selectedPaths: [...plan.selectedPaths],
+    selectionDeclaration: plan.selectionDeclaration ?? null,
+    commitMessage: plan.commitMessage,
+    rationale: plan.rationale,
+  };
+}
+
+export function publicFinalizationOutcome(code: string): FinalizationOutcome {
+  if ([
+    "FINALIZATION_REPOSITORY_DRIFT",
+    "FINALIZATION_SELECTED_STATE_DRIFT",
+    "FINALIZATION_SELECTED_PATHS_DRIFT",
+    "FINALIZATION_HEAD_DRIFT",
+    "FINALIZATION_BRANCH_DRIFT",
+    "FINALIZATION_REMOTE_DRIFT",
+  ].includes(code)) {
+    return "proposal_stale";
+  }
+  if (["FINALIZATION_PLAN_EXPIRED", "FINALIZATION_CONFIRMATION_EXPIRED"].includes(code)) {
+    return "confirmation_expired";
+  }
+  if ([
+    "FINALIZATION_REPOSITORY_NOT_ALLOWED",
+    "FINALIZATION_TASK_INTENT_INVALID",
+    "FINALIZATION_TASK_INTENT_REQUIRED",
+    "FINALIZATION_SELECTION_DECLARATION_INVALID",
+    "FINALIZATION_SELECTION_DECLARATION_REQUIRED",
+    "FINALIZATION_PATHS_REQUIRED",
+    "FINALIZATION_PATH_INVALID",
+    "FINALIZATION_PATH_DUPLICATE",
+    "FINALIZATION_PATH_BLOCKED",
+    "FINALIZATION_PATH_UNCHANGED",
+    "FINALIZATION_PATH_NOT_FILE",
+    "FINALIZATION_UNMERGED_PATHS",
+    "FINALIZATION_SECRET_DETECTED",
+    "FINALIZATION_COMMIT_MESSAGE_REQUIRED",
+    "FINALIZATION_COMMIT_MESSAGE_INVALID",
+    "FINALIZATION_RATIONALE_INVALID",
+    "FINALIZATION_BRANCH_INVALID",
+    "FINALIZATION_PROPOSAL_SOURCE_INVALID",
+    "FINALIZATION_REQUEST_INVALID",
+    "MIXED_PATH_REQUIRES_OWNER_SPLIT",
+  ].includes(code)) {
+    return "proposal_rejected";
+  }
+  return "execution_failed";
+}
+
+function publicFinalizationOutcomeCopy(outcome: FinalizationOutcome): {
   title: string;
   summary: string;
   suggestedAction: string;
 } {
-  if (code === "REPOSITORY_INIT_NOT_ALLOWED") {
+  if (outcome === "proposal_stale") {
     return {
-      title: "Repository initialization unavailable",
-      summary: "The selected directory is not eligible for local Git initialization.",
-      suggestedAction: "Rescan the directory and use initialization only before it becomes a Git repository.",
+      title: "Proposal needs refresh",
+      summary: "The approved selected content changed before finalization.",
+      suggestedAction: "Ask Codex to prepare a new proposal, then review and confirm it.",
     };
   }
-  if (code === "DIRTY_BLOCKS_PUSH") {
+  if (outcome === "confirmation_expired") {
     return {
-      title: "Push blocked by local changes",
-      summary: "The repository has local working tree changes, so push was not started.",
-      suggestedAction: "Commit or stash the local changes, rescan the repo, then retry push.",
+      title: "Confirmation expired",
+      summary: "The confirmation for this finalization plan has expired.",
+      suggestedAction: "Prepare or confirm the unchanged plan again before finalization.",
     };
   }
-  if (code === "DIRTY_BLOCKS_PULL") {
+  if (outcome === "proposal_rejected") {
     return {
-      title: "Pull blocked by local changes",
-      summary: "The repository has local working tree changes, so pull was not started.",
-      suggestedAction: "Commit or stash the local changes, rescan the repo, then retry pull.",
-    };
-  }
-  if (code === "DIVERGED_BLOCKS_SIMPLE_PUSH") {
-    return {
-      title: "Push blocked by remote divergence",
-      summary: "The repository is behind or diverged from its upstream, so simple push was not started.",
-      suggestedAction: "Rescan the repo and use the appropriate pull or stash+rebase workflow before pushing.",
-    };
-  }
-  if (code === "DIVERGED_BLOCKS_SIMPLE_PULL") {
-    return {
-      title: "Pull blocked by divergence",
-      summary: "The repository has local commits and remote commits, so fast-forward pull was not started.",
-      suggestedAction: "Resolve the divergence outside v1.1 simple pull, then rescan.",
-    };
-  }
-  if (code === "COMMIT_PATH_BLOCKED") {
-    return {
-      title: "Commit blocked by generated files",
-      summary: "Selected files include dependency or runtime-output paths that Agent08 will not commit.",
-      suggestedAction: "Deselect those files or update .gitignore, rescan the repo, then retry commit.",
-    };
-  }
-  if (code === "UNMERGED_BLOCKS_COMMIT") {
-    return {
-      title: "Commit blocked by unresolved conflicts",
-      summary: "The repository has unmerged conflict files, so Agent08 did not prepare a commit.",
-      suggestedAction: "Resolve the conflicts, rescan the repo, then retry commit.",
-    };
-  }
-  if (code === "DETACHED_HEAD_BLOCKS_MUTATION") {
-    return {
-      title: "Mutation blocked on detached HEAD",
-      summary: "The repository is not on a branch, so Agent08 did not start a Git mutation.",
-      suggestedAction: "Checkout the intended branch manually, rescan, then retry.",
-    };
-  }
-  if (code === "MERGE_OR_REBASE_IN_PROGRESS") {
-    return {
-      title: "Mutation blocked by in-progress Git operation",
-      summary: "A merge or rebase is already in progress, so Agent08 did not start another mutation.",
-      suggestedAction: "Finish or abort the existing Git operation manually, then rescan.",
-    };
-  }
-  if (code === "UPSTREAM_MISSING") {
-    return {
-      title: "Mutation blocked by missing upstream",
-      summary: "The branch has no upstream configured for this operation.",
-      suggestedAction: "Configure an upstream branch manually, rescan, then retry.",
-    };
-  }
-  if (code === "NO_COMMITS_TO_PUSH_WITH_UPSTREAM") {
-    return {
-      title: "Push with upstream blocked",
-      summary: "There are no local commits to publish for this branch.",
-      suggestedAction: "Rescan the repo. If it is already clean with no local commits, no push is needed.",
-    };
-  }
-  if (code === "DIRTY_BLOCKS_SET_UPSTREAM") {
-    return {
-      title: "Set upstream blocked by local changes",
-      summary: "The repository has local working tree changes, so Agent08 did not update upstream tracking.",
-      suggestedAction: "Commit or stash the local changes, rescan, then retry set upstream.",
-    };
-  }
-  if (code === "DIRTY_BLOCKS_PUSH_WITH_UPSTREAM") {
-    return {
-      title: "Push with upstream blocked by local changes",
-      summary: "The repository has local working tree changes, so Agent08 did not push or set upstream.",
-      suggestedAction: "Commit or stash the local changes, rescan, then retry push with upstream.",
-    };
-  }
-  if (code === "REMOTE_BRANCH_REQUIRED_FOR_SET_UPSTREAM") {
-    return {
-      title: "Set upstream blocked by missing remote branch",
-      summary: "Agent08 could not verify the matching origin branch required for local upstream setup.",
-      suggestedAction: "Rescan after the remote branch exists, or use push with upstream when publishing local commits.",
-    };
-  }
-  if (code === "BEHIND_BLOCKS_PUSH_WITH_UPSTREAM" || code === "DIVERGED_BLOCKS_PUSH_WITH_UPSTREAM") {
-    return {
-      title: "Push with upstream blocked by remote divergence",
-      summary: "The candidate remote branch has commits that are not safely included locally.",
-      suggestedAction: "Review the branch state and resolve divergence before publishing with upstream.",
-    };
-  }
-  if (code === "UPSTREAM_ALREADY_SET") {
-    return {
-      title: "Upstream setup is not needed",
-      summary: "The branch already has an upstream configured.",
-      suggestedAction: "Rescan the repo and use the normal push or pull action if one is available.",
+      title: "Proposal rejected",
+      summary: "The proposal does not satisfy the finalization contract.",
+      suggestedAction: "Correct the proposal, then prepare it again.",
     };
   }
   return {
-    title: "Mutation blocked by safety gate",
-    summary: "Agent08 blocked the Git mutation before running any command.",
-    suggestedAction: "Review the repo state, rescan, and retry only when the preconditions are satisfied.",
+    title: "Finalization could not be completed",
+    summary: "Agent08 could not complete this finalization request.",
+    suggestedAction: "Review the request and repository state, then prepare a new proposal.",
   };
+}
+
+function toCommitProposal(body: Record<string, unknown>): CommitProposal {
+  if (
+    !Array.isArray(body.selectedPaths) ||
+    body.selectedPaths.some((path) => typeof path !== "string")
+  ) {
+    throw new FinalizationError("FINALIZATION_PATHS_REQUIRED");
+  }
+  const commitMessage = requireBodyString(body, "commitMessage");
+  const expectedHead = optionalBodyString(body, "expectedHead");
+  const rationale = optionalBodyString(body, "rationale");
+  const source = toProposalSource(body);
+  const taskIntentId = optionalBodyString(body, "taskIntentId");
+  const selectionDeclaration = toSelectionDeclaration(body);
+  return {
+    selectedPaths: body.selectedPaths as string[],
+    commitMessage,
+    source,
+    ...(expectedHead === undefined ? {} : { expectedHead }),
+    ...(rationale === undefined ? {} : { rationale }),
+    ...(taskIntentId === undefined ? {} : { taskIntentId }),
+    ...(selectionDeclaration === undefined ? {} : { selectionDeclaration }),
+  };
+}
+
+function toPushProposal(body: Record<string, unknown>): PushProposal {
+  const expectedHead = optionalBodyString(body, "expectedHead");
+  const taskIntentId = optionalBodyString(body, "taskIntentId");
+  return {
+    source: toProposalSource(body),
+    ...(expectedHead === undefined ? {} : { expectedHead }),
+    ...(taskIntentId === undefined ? {} : { taskIntentId }),
+  };
+}
+
+function toProposalSource(body: Record<string, unknown>): ProposalSource {
+  const source = body.source;
+  if (source === undefined) return "manual";
+  if (source === "codex" || source === "manual") return source;
+  throw new FinalizationError("FINALIZATION_PROPOSAL_SOURCE_INVALID");
+}
+
+function toSelectionDeclaration(
+  body: Record<string, unknown>,
+): PathSelectionDeclaration | undefined {
+  const declaration = body.selectionDeclaration;
+  if (declaration === undefined) return undefined;
+  if (declaration === "exact_paths" || declaration === "mixed_or_indeterminate") {
+    return declaration;
+  }
+  throw new FinalizationError("FINALIZATION_REQUEST_INVALID", "selectionDeclaration");
+}
+
+function publicFinalizationConfirmation(value: unknown): PublicFinalizationConfirmation {
+  const source = value as {
+    operationId: string;
+    confirmationToken: string;
+    expiresAt: string;
+  };
+  return {
+    schemaVersion: 2,
+    operationId: source.operationId,
+    state: "confirmed",
+    confirmationToken: source.confirmationToken,
+    expiresAt: source.expiresAt,
+  };
+}
+
+function requireOperationId(value: unknown): string {
+  const operationId = (value as { operationId?: unknown } | null)?.operationId;
+  if (typeof operationId !== "string" || !operationId) {
+    throw new Error("finalization service did not return an operation ID");
+  }
+  return operationId;
+}
+
+function isScanRequest(request: GitControlDispatchRequest): boolean {
+  return request.method === "GET" && new URL(request.path, "http://127.0.0.1").pathname === "/api/git-control/scan";
+}
+
+function requireBodyString(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new FinalizationError("FINALIZATION_REQUEST_INVALID", field);
+  }
+  return value;
+}
+
+function optionalBodyString(body: Record<string, unknown>, field: string): string | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new FinalizationError("FINALIZATION_REQUEST_INVALID", field);
+  return value;
 }

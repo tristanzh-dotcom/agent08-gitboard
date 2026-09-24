@@ -1,179 +1,291 @@
+import { describe, expect, test } from "vitest";
+import { FinalizationError } from "../src/gitboard/finalizationContracts.js";
 import {
   dispatchGitControlHttpRequest,
+  publicFinalizationOutcome,
   type GitControlHttpService,
 } from "../src/gitboard/gitControlHttpServer.js";
-import { MutationSafetyError } from "../src/gitboard/mutationSafetyGate.js";
-import { describe, expect, test } from "vitest";
 
 describe("git control HTTP server", () => {
-  test("exposes read APIs as JSON without web-platform business logic", async () => {
-    const service: GitControlHttpService = {
-      async scan() {
-        return { cards: [{ id: "agent08-gitboard", statusLine: "main ✓" }] };
-      },
-      async repoDetail(repoId) {
-        return {
-          snapshot: { id: repoId },
-          stashList: [{ index: 0, selector: "stash@{0}", message: "WIP", branch: "main", createdAt: null }],
-        };
-      },
-      async mutationStatus(operationId) {
-        return { operationId, status: "queued" };
-      },
-      async prepareMutation(repoId, operation) {
-        return { repoId, operation, confirmationToken: "token-1" };
-      },
-      async mutate(repoId, operation, body) {
-        return { ok: true, repoId, operation, beforeSnapshotId: body.preflightSnapshotId };
-      },
-    };
+  test("classifies validation and post-confirmation path drift as proposal outcomes", () => {
+    expect(publicFinalizationOutcome("FINALIZATION_PATH_BLOCKED")).toBe("proposal_rejected");
+    expect(publicFinalizationOutcome("FINALIZATION_PATH_NOT_FILE")).toBe("proposal_rejected");
+    expect(publicFinalizationOutcome("FINALIZATION_SELECTED_PATHS_DRIFT")).toBe("proposal_stale");
+  });
+
+  test("exposes the canonical scan, safe repo detail, and exact finalization status DTOs", async () => {
+    const service = serviceFixture();
+    service.scan = async () => ({
+      schemaVersion: 2,
+      observation: { state: "verified", observedAt: "2026-08-19T00:00:00.000Z" },
+      repositories: [],
+    });
+    service.repoDetail = async (repoId) => ({
+      schemaVersion: 2,
+      repository: { repoId, label: "Agent08 GitBoard" },
+      stashCount: 0,
+    });
+    service.finalizationStatus = async (operationId) => finalizationStatusFixture(operationId);
+
     await expectJson(service, "GET", "/api/git-control/scan", 200, {
-      cards: [{ id: "agent08-gitboard", statusLine: "main ✓" }],
+      schemaVersion: 2,
+      observation: { state: "verified", observedAt: "2026-08-19T00:00:00.000Z" },
+      repositories: [],
     });
     await expectJson(service, "GET", "/api/git-control/repos/agent08-gitboard", 200, {
-      snapshot: { id: "agent08-gitboard" },
-      stashList: [{ index: 0, selector: "stash@{0}", message: "WIP", branch: "main", createdAt: null }],
+      schemaVersion: 2,
+      repository: { repoId: "agent08-gitboard", label: "Agent08 GitBoard" },
+      stashCount: 0,
     });
-    await expectJson(service, "GET", "/api/git-control/mutations/op-1", 200, {
+    await expectJson(service, "GET", "/api/git-control/finalizations/op-1", 200, {
+      schemaVersion: 2,
       operationId: "op-1",
-      status: "queued",
+      state: "ready",
+      outcome: "ready_for_confirmation",
+      resultCode: "FINALIZATION_PREPARED",
+      attempt: {
+        operation: "commit",
+        repoId: "agent02-pvi",
+        proposalSource: "codex",
+        taskIntentId: "task-agent02-1",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        completedAt: null,
+      },
+      plan: null,
+      receipt: null,
     });
     await expectJson(service, "GET", "/api/git-control/identity", 200, {
       ok: true,
       agentId: "agent08",
       service: "git-control",
     });
-    await expectJson(service, "GET", "/api/git-control/health", 200, {
-      ok: true,
-      agentId: "agent08",
-      service: "agent08-gitboard",
-      status: "ok",
-    });
   });
 
-  test("routes mutation prepare and execute requests through the injected service", async () => {
-    const seen: Array<{ repoId: string; operation: string; body?: unknown }> = [];
-    const service: GitControlHttpService = {
-      async scan() {
-        return {};
+  test("uses the receipt as terminal status without exposing private plan or receipt fields", async () => {
+    const service = serviceFixture();
+    service.finalizationStatus = async () => ({
+      operationId: "op-private-status",
+      status: "succeeded",
+      attempt: {
+        schemaVersion: 1,
+        operationId: "op-private-status",
+        operation: "push",
+        repoId: "agent02-pvi",
+        proposalSource: "codex",
+        taskIntentId: "task-agent02-publish",
+        status: "succeeded",
+        outcome: "ready_for_confirmation",
+        resultCode: "FINALIZATION_PLAN_PREPARED",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        completedAt: "2026-08-01T00:01:00.000Z",
       },
-      async repoDetail() {
-        return {};
+      plan: {
+        schemaVersion: 1,
+        operationId: "op-private-status",
+        operation: "push",
+        repoId: "agent02-pvi",
+        canonicalRepoPath: "/sentinel/absolute/private-repository-path",
+        branch: "main",
+        expectedHead: "a".repeat(40),
+        proposalSource: "codex",
+        taskIntentId: "task-agent02-publish",
+        remote: "origin",
+        remoteUrl: "https://user:credential@github.example.invalid/private.git",
+        remoteRef: "refs/heads/main",
+        expectedRemoteOid: "b".repeat(40),
+        confirmationToken: "confirmation-token-not-for-browser",
+        rawSelectedFileContents: "private file contents not for browser output",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        expiresAt: "2026-08-01T00:05:00.000Z",
       },
-      async mutationStatus() {
-        return {};
+      receipt: {
+        schemaVersion: 1,
+        operationId: "op-private-status",
+        operation: "push",
+        repoId: "agent02-pvi",
+        taskIntentId: "task-agent02-publish",
+        status: "succeeded",
+        resultCode: "PUSHED",
+        beforeOid: "b".repeat(40),
+        afterOid: "a".repeat(40),
+        branch: "main",
+        completedAt: "2026-08-01T00:01:00.000Z",
+        outputSummary: "raw git output: credential=not-for-browser",
       },
-      async prepareMutation(repoId, operation) {
-        seen.push({ repoId, operation });
-        return { repoId, operation, operationId: "op-prepare", confirmationToken: "token-1" };
+    } as unknown as import("../src/gitboard/finalizationContracts.js").FinalizationStatus);
+
+    const response = await dispatchGitControlHttpRequest(service, {
+      method: "GET",
+      path: "/api/git-control/finalizations/op-private-status",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      schemaVersion: 2,
+      operationId: "op-private-status",
+      state: "succeeded",
+      outcome: "pushed",
+      resultCode: "PUSHED",
+      attempt: {
+        operation: "push",
+        repoId: "agent02-pvi",
+        proposalSource: "codex",
+        taskIntentId: "task-agent02-publish",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        completedAt: "2026-08-01T00:01:00.000Z",
       },
-      async mutate(repoId, operation, body) {
-        seen.push({ repoId, operation, body });
-        return { ok: true, repoId, operation };
+      plan: {
+        operation: "push",
+        repoId: "agent02-pvi",
+        branch: "main",
+        expectedHead: "a".repeat(40),
+        proposalSource: "codex",
+        taskIntentId: "task-agent02-publish",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        expiresAt: "2026-08-01T00:05:00.000Z",
       },
+      receipt: {
+        operation: "push",
+        repoId: "agent02-pvi",
+        taskIntentId: "task-agent02-publish",
+        state: "succeeded",
+        resultCode: "PUSHED",
+        beforeOid: "b".repeat(40),
+        afterOid: "a".repeat(40),
+        branch: "main",
+        completedAt: "2026-08-01T00:01:00.000Z",
+      },
+    });
+    const serialized = JSON.stringify(response.body);
+    expect(serialized).not.toContain("/sentinel/absolute/private-repository-path");
+    expect(serialized).not.toContain("user:credential@github.example.invalid");
+    expect(serialized).not.toContain("confirmation-token-not-for-browser");
+    expect(serialized).not.toContain("private file contents not for browser output");
+    expect(serialized).not.toContain("raw git output: credential=not-for-browser");
+  });
+
+  test("routes prepare, separate confirmation, and execution without exposing confirmation at prepare", async () => {
+    const seen: unknown[] = [];
+    const service = serviceFixture();
+    service.prepareCommit = async (repoId, proposal) => {
+      seen.push({ action: "prepareCommit", repoId, proposal });
+      return { operationId: "op-commit", operation: "commit", repoId };
     };
+    service.preparePush = async (repoId, proposal) => {
+      seen.push({ action: "preparePush", repoId, proposal });
+      return { operationId: "op-push", operation: "push", repoId };
+    };
+    service.confirmFinalization = async (operationId) => {
+      seen.push({ action: "confirm", operationId });
+      return { operationId, confirmationToken: "token-1", expiresAt: "2026-07-30T10:01:00.000Z" };
+    };
+    service.executeFinalization = async (operationId, confirmationToken) => {
+      seen.push({ action: "execute", operationId, confirmationToken });
+      return { operationId, status: "succeeded" };
+    };
+    service.finalizationStatus = async (operationId) => {
+      if (operationId === "op-push") {
+        return finalizationStatusFixture(operationId, "push");
+      }
+      if (seen.some((item) => (item as { action?: string }).action === "execute")) {
+        return finalizationStatusFixture(operationId, "commit", "succeeded");
+      }
+      return finalizationStatusFixture(operationId, "commit");
+    };
+
     await expectJson(
       service,
       "POST",
       "/api/git-control/repos/agent02-pvi/commit/prepare",
       200,
-      { repoId: "agent02-pvi", operation: "commit", operationId: "op-prepare", confirmationToken: "token-1" },
+      publicStatusFixture("op-commit", "commit"),
+      {
+        selectedPaths: ["src/app.ts"],
+        commitMessage: "feat: final proposal",
+        expectedHead: "a".repeat(40),
+        rationale: "Codex reviewed the diff",
+        source: "codex",
+        taskIntentId: "task-agent02-release",
+        selectionDeclaration: "exact_paths",
+      },
     );
     await expectJson(
       service,
       "POST",
-      "/api/git-control/repos/agent02-pvi/stash-rebase",
+      "/api/git-control/repos/agent02-pvi/push/prepare",
       200,
-      { ok: true, repoId: "agent02-pvi", operation: "stash_rebase" },
-      { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
+      publicStatusFixture("op-push", "push"),
+      { expectedHead: "a".repeat(40), source: "manual" },
     );
     await expectJson(
       service,
       "POST",
-      "/api/git-control/repos/agent02-pvi/set-upstream/prepare",
+      "/api/git-control/finalizations/op-commit/confirm",
       200,
-      { repoId: "agent02-pvi", operation: "set_upstream", operationId: "op-prepare", confirmationToken: "token-1" },
+      {
+        schemaVersion: 2,
+        operationId: "op-commit",
+        state: "confirmed",
+        confirmationToken: "token-1",
+        expiresAt: "2026-07-30T10:01:00.000Z",
+      },
     );
     await expectJson(
       service,
       "POST",
-      "/api/git-control/repos/agent02-pvi/push-upstream",
+      "/api/git-control/finalizations/op-commit/execute",
       200,
-      { ok: true, repoId: "agent02-pvi", operation: "push_with_upstream" },
-      { preflightSnapshotId: "snap-2", confirmationToken: "token-2", branch: "ignored" },
-    );
-    await expectJson(
-      service,
-      "POST",
-      "/api/git-control/repos/agent11-fishtank-monitor/init/prepare",
-      200,
-      { repoId: "agent11-fishtank-monitor", operation: "init_repository", operationId: "op-prepare", confirmationToken: "token-1" },
-    );
-    await expectJson(
-      service,
-      "POST",
-      "/api/git-control/repos/agent11-fishtank-monitor/configure-origin/prepare",
-      200,
-      { repoId: "agent11-fishtank-monitor", operation: "configure_origin", operationId: "op-prepare", confirmationToken: "token-1" },
-    );
-    await expectJson(
-      service,
-      "POST",
-      "/api/git-control/repos/agent11-fishtank-monitor/bootstrap-push",
-      200,
-      { ok: true, repoId: "agent11-fishtank-monitor", operation: "bootstrap_push" },
-      { preflightSnapshotId: "snap-3", confirmationToken: "token-3" },
+      publicStatusFixture("op-commit", "commit", "succeeded"),
+      { confirmationToken: "token-1" },
     );
 
     expect(seen).toEqual([
-      { repoId: "agent02-pvi", operation: "commit" },
       {
+        action: "prepareCommit",
         repoId: "agent02-pvi",
-        operation: "stash_rebase",
-        body: { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
+        proposal: {
+          selectedPaths: ["src/app.ts"],
+          commitMessage: "feat: final proposal",
+          expectedHead: "a".repeat(40),
+          rationale: "Codex reviewed the diff",
+          source: "codex",
+          taskIntentId: "task-agent02-release",
+          selectionDeclaration: "exact_paths",
+        },
       },
-      { repoId: "agent02-pvi", operation: "set_upstream" },
       {
+        action: "preparePush",
         repoId: "agent02-pvi",
-        operation: "push_with_upstream",
-        body: { preflightSnapshotId: "snap-2", confirmationToken: "token-2", branch: "ignored" },
+        proposal: { expectedHead: "a".repeat(40), source: "manual" },
       },
-      { repoId: "agent11-fishtank-monitor", operation: "init_repository" },
-      { repoId: "agent11-fishtank-monitor", operation: "configure_origin" },
-      {
-        repoId: "agent11-fishtank-monitor",
-        operation: "bootstrap_push",
-        body: { preflightSnapshotId: "snap-3", confirmationToken: "token-3" },
-      },
+      { action: "confirm", operationId: "op-commit" },
+      { action: "execute", operationId: "op-commit", confirmationToken: "token-1" },
     ]);
   });
 
-  test("routes backend start and restart through the injected backend manager wrapper", async () => {
+  test("does not expose legacy development mutation routes", async () => {
+    const service = serviceFixture();
+    for (const path of [
+      "/api/git-control/repos/agent02-pvi/commit",
+      "/api/git-control/repos/agent02-pvi/stash-rebase",
+      "/api/git-control/repos/agent02-pvi/set-upstream/prepare",
+      "/api/git-control/repos/agent02-pvi/bootstrap-push",
+      "/api/git-control/repos/agent02-pvi/init/prepare",
+    ]) {
+      await expectJson(service, "POST", path, 404, { error: { code: "NOT_FOUND" } }, {});
+    }
+  });
+
+  test("routes the existing backend repair boundary independently", async () => {
     const calls: string[] = [];
-    const service: GitControlHttpService = {
-      async scan() {
-        return {};
-      },
-      async repoDetail() {
-        return {};
-      },
-      async mutationStatus() {
-        return {};
-      },
-      async prepareMutation() {
-        return {};
-      },
-      async mutate() {
-        return {};
-      },
-      async backendStart(agentId) {
-        calls.push(`start:${agentId}`);
-        return { agentId, status: "started", pid: 4204, port: 8004 };
-      },
-      async backendRestart(agentId) {
-        calls.push(`restart:${agentId}`);
-        return { agentId, status: "restarted", pid: 4206, port: 8086 };
-      },
+    const service = serviceFixture();
+    service.backendStart = async (agentId) => {
+      calls.push(`start:${agentId}`);
+      return { agentId, status: "started", pid: 4204, port: 8004 };
+    };
+    service.backendRestart = async (agentId) => {
+      calls.push(`restart:${agentId}`);
+      return { agentId, status: "restarted", pid: 4206, port: 8086 };
     };
 
     await expectJson(service, "POST", "/api/git-control/backend/agent04/start", 200, {
@@ -188,198 +300,190 @@ describe("git control HTTP server", () => {
       action: "restart",
       process: { agentId: "agent06", status: "restarted", pid: 4206, port: 8086 },
     });
-    await expectJson(service, "POST", "/api/git-control/backend/agent04/stop", 404, {
-      error: { code: "NOT_FOUND" },
-    });
-    await expectJson(service, "POST", "/api/git-control/backend/agent05/start", 409, {
-      error: {
-        code: "BACKEND_REPAIR_UNSUPPORTED_AGENT",
-        title: "Backend repair not available",
-        summary: "agent05 is not managed by the Agent08 backend repair executor.",
-        suggestedAction: "Use the documented manual startup path for this Agent.",
-      },
-    });
     expect(calls).toEqual(["start:agent04", "restart:agent06"]);
   });
 
-  test("returns productized errors instead of raw exception text", async () => {
-    const service: GitControlHttpService = {
-      async scan() {
-        throw new Error("fatal: https://token@example.invalid/private.git");
+  test("productizes finalization errors without leaking raw content", async () => {
+    const service = serviceFixture();
+    service.prepareCommit = async () => {
+      throw new FinalizationError(
+        "FINALIZATION_SECRET_DETECTED",
+        "private.txt: token=https://secret@example.invalid",
+      );
+    };
+
+    const response = await dispatchGitControlHttpRequest(service, {
+      method: "POST",
+      path: "/api/git-control/repos/agent02-pvi/commit/prepare",
+      body: { selectedPaths: ["private.txt"], commitMessage: "test" },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: {
+        code: "FINALIZATION_SECRET_DETECTED",
+        outcome: "proposal_rejected",
+        title: "Proposal rejected",
+        summary: "The proposal does not satisfy the finalization contract.",
+        suggestedAction: "Correct the proposal, then prepare it again.",
       },
-      async repoDetail() {
-        return {};
+    });
+    expect(JSON.stringify(response.body)).not.toContain("secret@example");
+  });
+
+  test("returns the bounded stale-proposal outcome with its operation ID", async () => {
+    const service = serviceFixture();
+    service.prepareCommit = async () => {
+      throw new FinalizationError(
+        "FINALIZATION_SELECTED_STATE_DRIFT",
+        "private.txt: token=https://secret@example.invalid",
+        "op-stale",
+      );
+    };
+
+    const response = await dispatchGitControlHttpRequest(service, {
+      method: "POST",
+      path: "/api/git-control/repos/agent02-pvi/commit/prepare",
+      body: {
+        selectedPaths: ["src/app.ts"],
+        commitMessage: "feat: final proposal",
+        expectedHead: "a".repeat(40),
+        source: "codex",
       },
-      async mutationStatus() {
-        return {};
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: {
+        code: "FINALIZATION_SELECTED_STATE_DRIFT",
+        operationId: "op-stale",
+        outcome: "proposal_stale",
+        title: "Proposal needs refresh",
+        summary: "The approved selected content changed before finalization.",
+        suggestedAction: "Ask Codex to prepare a new proposal, then review and confirm it.",
       },
-      async prepareMutation() {
-        return {};
+    });
+    expect(JSON.stringify(response.body)).not.toContain("secret@example");
+  });
+
+  test("rejects an unrecognized proposal source", async () => {
+    const response = await dispatchGitControlHttpRequest(serviceFixture(), {
+      method: "POST",
+      path: "/api/git-control/repos/agent02-pvi/push/prepare",
+      body: { source: "operator" },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: {
+        code: "FINALIZATION_PROPOSAL_SOURCE_INVALID",
+        outcome: "proposal_rejected",
+        title: "Proposal rejected",
+        summary: "The proposal does not satisfy the finalization contract.",
+        suggestedAction: "Correct the proposal, then prepare it again.",
       },
-      async mutate() {
-        return {};
-      },
+    });
+  });
+
+  test("fails closed with an unverified canonical scan envelope", async () => {
+    const service = serviceFixture();
+    service.scan = async () => {
+      throw new Error("fatal: https://token@example.invalid/private.git");
     };
     const response = await dispatchGitControlHttpRequest(service, {
       method: "GET",
       path: "/api/git-control/scan",
     });
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(503);
     expect(response.body).toEqual({
-      error: {
-      code: "AGENT08_SERVICE_ERROR",
-      title: "Agent08 service unavailable",
-      summary: "The Git Control service could not complete the request.",
-      suggestedAction: "Check the local agent08-gitboard service logs and retry.",
+      schemaVersion: 2,
+      observation: {
+        state: "unverified",
+        observedAt: null,
+        reasonCode: "AGENT08_SCAN_FAILED",
       },
+      repositories: [],
     });
     expect(JSON.stringify(response.body)).not.toContain("token@example");
   });
-
-  test("propagates mutation safety errors with operation-specific productized codes", async () => {
-    const service: GitControlHttpService = {
-      async scan() {
-        return {};
-      },
-      async repoDetail() {
-        return {};
-      },
-      async mutationStatus() {
-        return {};
-      },
-      async prepareMutation() {
-        return {};
-      },
-      async mutate() {
-        throw new MutationSafetyError("DIRTY_BLOCKS_PUSH");
-      },
-    };
-
-    const response = await dispatchGitControlHttpRequest(service, {
-      method: "POST",
-      path: "/api/git-control/repos/agent02-pvi/push",
-      body: { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
-    });
-
-    expect(response.status).toBe(409);
-    expect(response.body).toEqual({
-      error: {
-        code: "DIRTY_BLOCKS_PUSH",
-        title: "Push blocked by local changes",
-        summary: "The repository has local working tree changes, so push was not started.",
-        suggestedAction: "Commit or stash the local changes, rescan the repo, then retry push.",
-      },
-    });
-  });
-
-  test("productizes blocked commit path safety errors", async () => {
-    const service: GitControlHttpService = {
-      async scan() {
-        return {};
-      },
-      async repoDetail() {
-        return {};
-      },
-      async mutationStatus() {
-        return {};
-      },
-      async prepareMutation() {
-        return {};
-      },
-      async mutate() {
-        throw new MutationSafetyError("COMMIT_PATH_BLOCKED");
-      },
-    };
-
-    const response = await dispatchGitControlHttpRequest(service, {
-      method: "POST",
-      path: "/api/git-control/repos/agent07-sentinel/commit",
-      body: { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
-    });
-
-    expect(response.status).toBe(409);
-    expect(response.body).toEqual({
-      error: {
-        code: "COMMIT_PATH_BLOCKED",
-        title: "Commit blocked by generated files",
-        summary: "Selected files include dependency or runtime-output paths that Agent08 will not commit.",
-        suggestedAction: "Deselect those files or update .gitignore, rescan the repo, then retry commit.",
-      },
-    });
-  });
-
-  test("productizes unmerged commit safety errors before confirmation", async () => {
-    const service: GitControlHttpService = {
-      async scan() {
-        return {};
-      },
-      async repoDetail() {
-        return {};
-      },
-      async mutationStatus() {
-        return {};
-      },
-      async prepareMutation() {
-        throw new MutationSafetyError("UNMERGED_BLOCKS_COMMIT");
-      },
-      async mutate() {
-        return {};
-      },
-    };
-
-    const response = await dispatchGitControlHttpRequest(service, {
-      method: "POST",
-      path: "/api/git-control/repos/agent02-pvi/commit/prepare",
-    });
-
-    expect(response.status).toBe(409);
-    expect(response.body).toEqual({
-      error: {
-        code: "UNMERGED_BLOCKS_COMMIT",
-        title: "Commit blocked by unresolved conflicts",
-        summary: "The repository has unmerged conflict files, so Agent08 did not prepare a commit.",
-        suggestedAction: "Resolve the conflicts, rescan the repo, then retry commit.",
-      },
-    });
-  });
-
-  test("productizes push-with-upstream safety errors", async () => {
-    const service: GitControlHttpService = {
-      async scan() {
-        return {};
-      },
-      async repoDetail() {
-        return {};
-      },
-      async mutationStatus() {
-        return {};
-      },
-      async prepareMutation() {
-        return {};
-      },
-      async mutate() {
-        throw new MutationSafetyError("NO_COMMITS_TO_PUSH_WITH_UPSTREAM");
-      },
-    };
-
-    const response = await dispatchGitControlHttpRequest(service, {
-      method: "POST",
-      path: "/api/git-control/repos/agent02-pvi/push-upstream",
-      body: { preflightSnapshotId: "snap-1", confirmationToken: "token-1" },
-    });
-
-    expect(response.status).toBe(409);
-    expect(response.body).toEqual({
-      error: {
-        code: "NO_COMMITS_TO_PUSH_WITH_UPSTREAM",
-        title: "Push with upstream blocked",
-        summary: "There are no local commits to publish for this branch.",
-        suggestedAction: "Rescan the repo. If it is already clean with no local commits, no push is needed.",
-      },
-    });
-  });
 });
+
+function serviceFixture(): GitControlHttpService {
+  return {
+    async scan() {
+      return {};
+    },
+    async repoDetail() {
+      return {};
+    },
+    async prepareCommit() {
+      return {};
+    },
+    async preparePush() {
+      return {};
+    },
+    async confirmFinalization() {
+      return {};
+    },
+    async executeFinalization() {
+      return {};
+    },
+    async finalizationStatus() {
+      return finalizationStatusFixture("op-default");
+    },
+  };
+}
+
+function finalizationStatusFixture(
+  operationId: string,
+  operation: "commit" | "push" = "commit",
+  status: "ready" | "succeeded" = "ready",
+): import("../src/gitboard/finalizationContracts.js").FinalizationStatus {
+  return {
+    operationId,
+    status,
+    attempt: {
+      schemaVersion: 1,
+      operationId,
+      operation,
+      repoId: "agent02-pvi",
+      proposalSource: "codex",
+      taskIntentId: "task-agent02-1",
+      status,
+      outcome: status === "succeeded" ? (operation === "commit" ? "committed" : "pushed") : "ready_for_confirmation",
+      resultCode: status === "succeeded" ? (operation === "commit" ? "COMMITTED" : "PUSHED") : "FINALIZATION_PREPARED",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      completedAt: status === "succeeded" ? "2026-08-01T00:01:00.000Z" : null,
+    },
+    plan: null,
+    receipt: null,
+  };
+}
+
+function publicStatusFixture(
+  operationId: string,
+  operation: "commit" | "push",
+  status: "ready" | "succeeded" = "ready",
+): unknown {
+  return {
+    schemaVersion: 2,
+    operationId,
+    state: status,
+    outcome: status === "succeeded" ? (operation === "commit" ? "committed" : "pushed") : "ready_for_confirmation",
+    resultCode: status === "succeeded" ? (operation === "commit" ? "COMMITTED" : "PUSHED") : "FINALIZATION_PREPARED",
+    attempt: {
+      operation,
+      repoId: "agent02-pvi",
+      proposalSource: "codex",
+      taskIntentId: "task-agent02-1",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      completedAt: status === "succeeded" ? "2026-08-01T00:01:00.000Z" : null,
+    },
+    plan: null,
+    receipt: null,
+  };
+}
 
 async function expectJson(
   service: GitControlHttpService,

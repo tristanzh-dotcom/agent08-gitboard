@@ -5,6 +5,10 @@ Date: 2026-06-19
 Owner: Agent08 / agent08-gitboard
 Related baseline: `docs/sdd/git-control-v1.1.md`
 
+Forward reference: `docs/sdd/git-control-v1.3-local-isolation.md` defines the
+separately approved Phase A contract for machine-authorized local isolation. It
+does not retroactively approve or change this draft.
+
 ## 1. Purpose
 
 Agent08 v1.1 can commit, push, pull, stash, and rebase only when a repo already has a valid upstream. The current blind spot is `upstream: null`: a clean repo with no upstream may be rendered as if it were synced, for example `main ✓`, even though Agent08 cannot prove push or pull state.

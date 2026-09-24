@@ -34,13 +34,19 @@ describe("git control server config", () => {
         async repoDetail() {
           return {};
         },
-        async mutationStatus() {
+        async prepareCommit() {
           return {};
         },
-        async prepareMutation() {
+        async preparePush() {
           return {};
         },
-        async mutate() {
+        async confirmFinalization() {
+          return {};
+        },
+        async executeFinalization() {
+          return {};
+        },
+        async finalizationStatus() {
           return {};
         },
       },

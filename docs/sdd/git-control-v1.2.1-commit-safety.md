@@ -5,6 +5,10 @@ Date: 2026-06-19
 Owner: Agent08 / agent08-gitboard
 Related baseline: `docs/sdd/git-control-v1.1.md`, `docs/sdd/git-control-v1.2-upstream.md`
 
+Forward reference: `docs/sdd/git-control-v1.3-local-isolation.md` defines the
+separately approved Phase A contract for machine-authorized local isolation. It
+does not retroactively approve or change this draft.
+
 ## 1. Purpose
 
 Agent08 v1.2 can commit selected files, but the latest end-user test exposed a safety gap: a commit selection may include dependency or runtime-output directories such as `node_modules/` and `storage/runtime_shadow/`. Git accepts the command, so the operation can succeed while publishing the wrong scope.

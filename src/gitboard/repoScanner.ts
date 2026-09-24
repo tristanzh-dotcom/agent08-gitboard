@@ -28,12 +28,11 @@ export class RepoScanner {
 
   private async scanOne(target: RepoManifestEntry): Promise<RepoSnapshot> {
     try {
-      const [status, lastCommit, diffStat, stashList, largeFiles] = await Promise.all([
+      const [status, lastCommit, diffStat, stashList] = await Promise.all([
         this.git.statusPorcelain(target.path),
         this.git.lastCommit(target.path),
         this.git.diffStat(target.path),
-        this.git.stashList(target.path),
-        this.git.listLargeFiles(target.path, 1_000_000)
+        this.git.stashList(target.path)
       ]);
 
       const parsedStatus = parseStatusPorcelain(status);
@@ -54,6 +53,8 @@ export class RepoScanner {
 
       return {
         id: target.id,
+        observationState: "verified",
+        observationReasonCode: null,
         path: target.path,
         remote: target.remote,
         exists: true,
@@ -71,7 +72,7 @@ export class RepoScanner {
         dirty: {
           ...parsedStatus.dirty,
           stashCount: countStashes(stashList),
-          largeFiles
+          largeFiles: []
         },
         diffStat: parseDiffStat(diffStat),
         healthScore: emptyHealthScore()
@@ -83,7 +84,7 @@ export class RepoScanner {
       if (isMissingRepoError(error)) {
         return missingRepoSnapshot(target);
       }
-      throw error;
+      return unverifiedRepoSnapshot(target, await this.pathProbe.exists(target.path));
     }
   }
 
@@ -99,6 +100,7 @@ function parseStatusPorcelain(status: string): Pick<
   "branch" | "upstream" | "ahead" | "behind" | "dirty"
 > {
   const dirty = {
+    added: [] as string[],
     modified: [] as string[],
     untracked: [] as string[],
     deleted: [] as string[],
@@ -140,6 +142,7 @@ function parseStatusPorcelain(status: string): Pick<
       const filePath = parts.slice(8).join(" ");
       if (!filePath) continue;
       if (xy.includes("D")) dirty.deleted.push(filePath);
+      else if (xy.includes("A")) dirty.added.push(filePath);
       else if (xy.includes("M")) dirty.modified.push(filePath);
       continue;
     }
@@ -189,7 +192,7 @@ function countStashes(raw: string): number {
 function isMissingRepoError(error: unknown): boolean {
   return (
     error instanceof Error &&
-    /ENOENT|not a git repository|No such file|index\.lock|cannot read|Unable to read current working directory/i.test(
+    /ENOENT|No such file|Unable to read current working directory/i.test(
       error.message
     )
   );
@@ -202,6 +205,8 @@ function isNotGitRepositoryError(error: unknown): boolean {
 function missingRepoSnapshot(target: RepoManifestEntry, initializable = false): RepoSnapshot {
   return {
     id: target.id,
+    observationState: "verified",
+    observationReasonCode: null,
     path: target.path,
     remote: target.remote,
     exists: false,
@@ -217,6 +222,7 @@ function missingRepoSnapshot(target: RepoManifestEntry, initializable = false): 
     commitsToPushSubjects: [],
     lastCommit: { sha: null, subject: null, authorDate: null },
     dirty: {
+      added: [],
       modified: [],
       untracked: [],
       deleted: [],
@@ -227,6 +233,16 @@ function missingRepoSnapshot(target: RepoManifestEntry, initializable = false): 
     },
     diffStat: { filesChanged: 0, insertions: 0, deletions: 0 },
     healthScore: emptyHealthScore()
+  };
+}
+
+function unverifiedRepoSnapshot(target: RepoManifestEntry, pathExists: boolean): RepoSnapshot {
+  return {
+    ...missingRepoSnapshot(target),
+    observationState: "unverified",
+    observationReasonCode: "REPO_SCAN_FAILED",
+    exists: pathExists,
+    initializable: false,
   };
 }
 

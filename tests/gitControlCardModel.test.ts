@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
+import {
+  buildCommitConfirmationModel,
+  buildGitControlCardModel,
+} from "../src/gitboard/gitControlCardModel.js";
 import type { RepoSnapshot } from "../src/gitboard/types.js";
-
-async function cardModels() {
-  return import("../src/gitboard/gitControlCardModel.js");
-}
 
 function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
   return {
@@ -21,7 +21,7 @@ function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
     behind: 0,
     commitsToPushCount: 0,
     commitsToPushSubjects: [],
-    lastCommit: { sha: "abc123", subject: "test: fixture", authorDate: "2026-06-19T00:00:00.000Z" },
+    lastCommit: { sha: "abc123", subject: "test: fixture", authorDate: "2026-07-30T00:00:00.000Z" },
     dirty: { modified: [], untracked: [], deleted: [], renamed: [], stashCount: 0, largeFiles: [] },
     diffStat: { filesChanged: 0, insertions: 0, deletions: 0 },
     healthScore: {
@@ -36,284 +36,96 @@ function snapshot(overrides: Partial<RepoSnapshot> = {}): RepoSnapshot {
   };
 }
 
-describe("Git Control card model", () => {
-  test("existing non-Git directories expose only local repository initialization", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        id: "agent11-fishtank-monitor",
-        path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
-        remote: "",
-        exists: false,
-        initializable: true,
-        branch: null,
-        upstream: null,
-        upstreamState: "unknown",
-      }),
-    );
-
-    expect(card).toMatchObject({
-      blockedReason: null,
-      statusLine: "local directory · Git not initialized",
-      actions: [{ id: "init_repository", enabled: true }],
-    });
-  });
-
-  test("Agent12 exposes origin configuration for an initialized local repository", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        id: "agent12-fishtank-3dtwin",
-        path: "/Users/tristanzh/agent/agent12-fishtank-3Dtwin",
-        remote: "https://github.com/tristanzh-dotcom/agent12-fishtank-3dtwin.git",
-        upstream: null,
-        remoteTrackingBranch: "origin/main",
-        remoteHasBranch: false,
-        upstreamState: "remote_check_failed",
-      }),
-    );
-
-    expect(card.actions).toEqual([{ id: "configure_origin", enabled: true }]);
-  });
-
-  test("Agent12 exposes bootstrap push after origin configuration", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        id: "agent12-fishtank-3dtwin",
-        path: "/Users/tristanzh/agent/agent12-fishtank-3Dtwin",
-        remote: "https://github.com/tristanzh-dotcom/agent12-fishtank-3dtwin.git",
-        upstream: null,
-        remoteTrackingBranch: "origin/main",
-        remoteHasBranch: false,
-        upstreamState: "missing_upstream_remote_missing",
-        commitsToPushCount: 1,
-      }),
-    );
-
-    expect(card.actions).toEqual([{ id: "bootstrap_push", enabled: true }]);
-  });
-
-  test("clean synced repo shows no mutation buttons", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(snapshot());
+describe("Git Control v1.4 card model", () => {
+  test("exposes no Agent08 mutation for a non-Git development directory", () => {
+    const card = buildGitControlCardModel(snapshot({
+      exists: false,
+      initializable: true,
+      branch: null,
+      upstream: null,
+      upstreamState: "unknown",
+    }));
 
     expect(card.actions).toEqual([]);
-    expect(card.statusLine).toBe("main ✓");
-    expect(card.dirtyLine).toBe("clean");
+    expect(card.blockedReason).toBe("not a Git repository");
   });
 
-  test("dirty synced repo shows commit", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({ dirty: { ...snapshot().dirty, modified: ["src/index.ts"], untracked: ["notes.md"] } }),
-    );
+  test("dirty repository exposes only final commit", () => {
+    const card = buildGitControlCardModel(snapshot({
+      dirty: { ...snapshot().dirty, modified: ["src/index.ts"], untracked: ["notes.md"] },
+    }));
 
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["commit", true]]);
+    expect(card.actions).toEqual([{ id: "commit", enabled: true }]);
     expect(card.dirtyLine).toBe("2 dirty");
   });
 
-  test("root handover markdown deletions do not count as operational dirty", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        dirty: {
-          ...snapshot().dirty,
-          deleted: [
-            "HANDOVER_agent05_pptmaker_20260604.md",
-            "HANDOVER_agent05_web_service_control_20260617.md",
-          ],
-        },
-      }),
-    );
+  test("dirty repository with existing commits to publish exposes commit and push", () => {
+    const card = buildGitControlCardModel(snapshot({
+      ahead: 2,
+      commitsToPushCount: 2,
+      dirty: { ...snapshot().dirty, modified: ["src/index.ts"] },
+    }));
 
-    expect(card.dirtyLine).toBe("clean");
-    expect(card.actions).toEqual([]);
-  });
-
-  test("handover markdown changes outside root deletion still count as operational dirty", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        dirty: {
-          ...snapshot().dirty,
-          modified: ["HANDOVER_agent05_pptmaker_20260604.md"],
-          deleted: ["docs/HANDOVER_agent05_pptmaker_20260604.md"],
-        },
-      }),
-    );
-
-    expect(card.dirtyLine).toBe("2 dirty");
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["commit", true]]);
-  });
-
-  test("clean ahead repo shows push", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(snapshot({ ahead: 2 }));
-
-    expect(card.statusLine).toBe("main ↑2");
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["push", true]]);
-  });
-
-  test("dirty ahead repo keeps push disabled until post-commit rescan confirms clean", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const dirtyAhead = buildGitControlCardModel(
-      snapshot({ ahead: 2, dirty: { ...snapshot().dirty, modified: ["src/index.ts"] } }),
-      { postCommitRescanPending: true },
-    );
-    expect(dirtyAhead.actions.map((action) => [action.id, action.enabled])).toEqual([
-      ["commit", true],
-      ["push", false],
-    ]);
-
-    const cleanAfterRescan = buildGitControlCardModel(snapshot({ ahead: 3 }), { postCommitRescanPending: false });
-    expect(cleanAfterRescan.actions.map((action) => [action.id, action.enabled])).toEqual([["push", true]]);
-  });
-
-  test("clean behind repo shows pull", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(snapshot({ behind: 1 }));
-
-    expect(card.statusLine).toBe("main ↓1");
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["pull", true]]);
-  });
-
-  test("dirty behind repo shows commit and stash+rebase", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({ behind: 1, dirty: { ...snapshot().dirty, modified: ["src/index.ts"] } }),
-    );
-
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([
-      ["commit", true],
-      ["stash+rebase", true],
+    expect(card.actions).toEqual([
+      { id: "commit", enabled: true },
+      { id: "push", enabled: true },
     ]);
   });
 
-  test("stash line appears only when stash count is greater than zero", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    expect(buildGitControlCardModel(snapshot()).stashLine).toBeNull();
-    expect(buildGitControlCardModel(snapshot({ dirty: { ...snapshot().dirty, stashCount: 2 } })).stashLine).toBe("stash: 2");
+  test("unmerged development state blocks commit but not an existing final push", () => {
+    const card = buildGitControlCardModel(snapshot({
+      ahead: 1,
+      commitsToPushCount: 1,
+      dirty: { ...snapshot().dirty, unmerged: ["src/conflict.ts"] },
+    }));
+
+    expect(card.actions).toEqual([{ id: "push", enabled: true }]);
+    expect(card.blockedReason).toBeNull();
   });
 
-  test("detached HEAD shows no mutation buttons and a blocked reason", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(snapshot({ branch: null, dirty: { ...snapshot().dirty, modified: ["README.md"] } }));
+  test("behind state does not expose pull or rebase orchestration", () => {
+    const clean = buildGitControlCardModel(snapshot({ behind: 1 }));
+    const dirty = buildGitControlCardModel(snapshot({
+      behind: 1,
+      dirty: { ...snapshot().dirty, modified: ["src/index.ts"] },
+    }));
+
+    expect(clean.actions).toEqual([]);
+    expect(dirty.actions).toEqual([{ id: "commit", enabled: true }]);
+  });
+
+  test("a new remote branch with local commits uses the same final push action", () => {
+    const card = buildGitControlCardModel(snapshot({
+      upstream: null,
+      upstreamState: "missing_upstream_remote_missing",
+      remoteHasBranch: false,
+      commitsToPushCount: 1,
+      commitsToPushSubjects: ["feat: local commit"],
+    }));
+
+    expect(card.actions).toEqual([{ id: "push", enabled: true }]);
+    expect(card.actions.map((action) => action.id)).not.toContain("bootstrap_push");
+  });
+
+  test("detached HEAD exposes no finalization action", () => {
+    const card = buildGitControlCardModel(snapshot({
+      branch: null,
+      ahead: 1,
+      dirty: { ...snapshot().dirty, modified: ["README.md"] },
+    }));
 
     expect(card.actions).toEqual([]);
     expect(card.blockedReason).toBe("detached HEAD");
   });
 
-  test("agent08 self card shows running-code warning before self mutation", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        id: "agent08-gitboard",
-        path: "/Users/tristanzh/agent/agent08-gitboard",
-        dirty: { ...snapshot().dirty, modified: ["src/gitboard/index.ts"] },
-      }),
-    );
-
-    expect(card.selfMutationWarning).toMatch(/Running service code will not change until restart/);
-  });
-
-  test("clean repo without upstream but with remote branch shows set-upstream instead of synced", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        upstream: null,
-        remoteHasBranch: true,
-        upstreamState: "missing_upstream_remote_exists",
-        commitsToPushCount: 0,
-        commitsToPushSubjects: [],
-      }),
-    );
-
-    expect(card.statusLine).toBe("main · no upstream");
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["set-upstream", true]]);
-  });
-
-  test("clean repo without upstream and with candidate commits shows push-upstream", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        upstream: null,
-        remoteHasBranch: false,
-        upstreamState: "missing_upstream_remote_missing",
-        commitsToPushCount: 1,
-        commitsToPushSubjects: ["feat(agent02): local commit"],
-      }),
-    );
-
-    expect(card.statusLine).toBe("main · no upstream");
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["push-upstream", true]]);
-  });
-
-  test("clean repo without upstream and without commits shows no publish action", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        upstream: null,
-        remoteHasBranch: false,
-        upstreamState: "missing_upstream_remote_missing",
-        commitsToPushCount: 0,
-        commitsToPushSubjects: [],
-      }),
-    );
-
-    expect(card.statusLine).toBe("main · no upstream");
-    expect(card.actions).toEqual([]);
-    expect(card.blockedReason).toBe("no commits to publish");
-  });
-
-  test("orphaned upstream is blocked and never rendered as synced", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        upstream: "origin/main",
-        remoteHasBranch: false,
-        upstreamState: "orphaned_upstream",
-      }),
-    );
-
-    expect(card.statusLine).toBe("main · upstream unreachable");
-    expect(card.actions).toEqual([]);
-    expect(card.blockedReason).toBe("upstream unreachable");
-  });
-
-  test("remote check failures do not block local commit workflow", async () => {
-    const { buildGitControlCardModel } = await cardModels();
-    const card = buildGitControlCardModel(
-      snapshot({
-        upstream: "origin/main",
-        remoteHasBranch: false,
-        upstreamState: "remote_check_failed",
-        dirty: { ...snapshot().dirty, modified: ["workflows/mantou-dog/mcht_app.py"] },
-      }),
-    );
-
-    expect(card.statusLine).toBe("main · remote check failed");
-    expect(card.actions.map((action) => [action.id, action.enabled])).toEqual([["commit", true]]);
-    expect(card.blockedReason).toBeNull();
-  });
-});
-
-describe("commit confirmation model", () => {
-  test("requires a non-empty commit message and shows per-file insertion and deletion counts", async () => {
-    const { buildCommitConfirmationModel } = await cardModels();
+  test("requires a non-empty commit message in the confirmation model", () => {
     const model = buildCommitConfirmationModel({
       message: "  ",
-      files: [
-        { path: "src/gitboard/mutationSafetyGate.ts", insertions: 84, deletions: 2 },
-        { path: "tests/mutationSafetyGate.test.ts", insertions: 211, deletions: 0 },
-      ],
+      files: [{ path: "src/app.ts", insertions: 4, deletions: 1 }],
     });
 
     expect(model.canConfirm).toBe(false);
     expect(model.messageError).toBe("COMMIT_MESSAGE_REQUIRED");
-    expect(model.fileRows).toEqual([
-      "src/gitboard/mutationSafetyGate.ts +84 -2",
-      "tests/mutationSafetyGate.test.ts +211 -0",
-    ]);
+    expect(model.fileRows).toEqual(["src/app.ts +4 -1"]);
   });
 });

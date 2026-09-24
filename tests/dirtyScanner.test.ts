@@ -38,12 +38,25 @@ const fakeGit: GitProxy = {
     return "stash@{0}: On main: frozen\nstash@{1}: On main: residual";
   },
   async listLargeFiles(_repoPath, _thresholdBytes) {
-    return [{ path: "workflows/mantou-dog/data/photo-export.bin", bytes: 1_200_000 }];
+    throw new Error("canonical scan must not walk the filesystem for large files");
   }
 };
 
 describe("RepoScanner M2 dirty data scan", () => {
-  test("reports modified files, untracked files, stash count, diff stat, and files over 1 MB", async () => {
+  test("reports staged additions as changed paths", async () => {
+    const addedGit: GitProxy = {
+      ...fakeGit,
+      async statusPorcelain() {
+        return "# branch.head main\n1 A. N... 000000 100644 100644 000000 abcdef docs/new.md";
+      },
+    };
+
+    const [snapshot] = await new RepoScanner(addedGit).scanAll(manifest);
+
+    expect(snapshot.dirty.added).toEqual(["docs/new.md"]);
+  });
+
+  test("reports Git truth without filesystem large-file gating", async () => {
     const scanner = new RepoScanner(fakeGit);
 
     const [snapshot] = await scanner.scanAll(manifest);
@@ -51,9 +64,7 @@ describe("RepoScanner M2 dirty data scan", () => {
     expect(snapshot.dirty.modified).toEqual(["workflows/mantou-dog/mcht_app.py"]);
     expect(snapshot.dirty.untracked).toEqual(["workflows/mantou-dog/data/timeseries_metrics.json"]);
     expect(snapshot.dirty.stashCount).toBe(2);
-    expect(snapshot.dirty.largeFiles).toEqual([
-      { path: "workflows/mantou-dog/data/photo-export.bin", bytes: 1_200_000 }
-    ]);
+    expect(snapshot.dirty.largeFiles).toEqual([]);
     expect(snapshot.diffStat).toEqual({ filesChanged: 2, insertions: 12, deletions: 3 });
   });
 
@@ -146,7 +157,7 @@ describe("RepoScanner M2 dirty data scan", () => {
     ]);
   });
 
-  test("returns exists:false when git cannot acquire a stale index lock", async () => {
+  test("keeps an existing repository unverified when git cannot acquire an index lock", async () => {
     const lockedGit: GitProxy = {
       async statusPorcelain(_repoPath) {
         throw new Error("fatal: Unable to create '.git/index.lock': File exists.");
@@ -165,9 +176,13 @@ describe("RepoScanner M2 dirty data scan", () => {
       }
     };
 
-    const [snapshot] = await new RepoScanner(lockedGit).scanAll(manifest);
+    const [snapshot] = await new RepoScanner(lockedGit, { exists: async () => true }).scanAll(manifest);
 
-    expect(snapshot.exists).toBe(false);
+    expect(snapshot).toMatchObject({
+      exists: true,
+      observationState: "unverified",
+      observationReasonCode: "REPO_SCAN_FAILED",
+    });
     expect(snapshot.dirty.modified).toEqual([]);
   });
 });

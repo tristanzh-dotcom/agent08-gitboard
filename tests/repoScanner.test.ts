@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createDefaultManifest } from "../src/gitboard/manifest.js";
 import { RepoScanner } from "../src/gitboard/repoScanner.js";
 import type { GitProxy } from "../src/gitboard/gitProxy.js";
@@ -27,16 +27,18 @@ const fakeGit: GitProxy = {
 };
 
 describe("RepoScanner M1 multi-repo dashboard scan", () => {
-  test("scans all 15 manifest targets including Agent11, Agent12, Agent13, Agent14, and home-platform projects", async () => {
+  test("scans all 16 manifest targets including Agent11, Agent12, Agent13, Agent14, and home-platform projects", async () => {
     const manifest = createDefaultManifest("/Users/tristanzh/agent");
     const scanner = new RepoScanner(fakeGit);
 
     const snapshots = await scanner.scanAll(manifest);
 
-    expect(snapshots).toHaveLength(15);
+    expect(manifest.version).toBe(2);
+    expect(snapshots).toHaveLength(16);
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent08-gitboard");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent10-asset-library");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent11-fishtank-monitor");
+    expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent11-fishtank-extension");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent12-fishtank-3dtwin");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent13-esp-reminder");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("home-platform");
@@ -48,6 +50,27 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
         path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
         remote: "https://github.com/tristanzh-dotcom/agent11-fishtank-monitor.git",
         visibility: "private",
+      }),
+    );
+    expect(manifest.targets).toContainEqual(
+      expect.objectContaining({
+        id: "agent11-fishtank-extension",
+        agent: "Agent11",
+        ownerId: "agent11",
+        kind: "business",
+        lifecycle: "active",
+        label: "Fishtank Extension",
+        path: "/Users/tristanzh/agent/agent11-fishtank-extension",
+        remote: "",
+        visibility: "local",
+      }),
+    );
+    expect(manifest.targets).toContainEqual(
+      expect.objectContaining({
+        id: "web-platform",
+        ownerId: "agent00",
+        kind: "platform",
+        lifecycle: "active",
       }),
     );
     expect(manifest.targets).toContainEqual(
@@ -141,11 +164,87 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
 
     expect(snapshot).toMatchObject({
       id: "agent11-fishtank-monitor",
+      observationState: "verified",
+      observationReasonCode: null,
       exists: false,
       initializable: true,
       branch: null,
       upstream: null,
     });
+  });
+
+  test("isolates an unreadable repository without misreporting it as missing or scanning filesystem large files", async () => {
+    const listLargeFiles = vi.fn(async () => []);
+    const git: GitProxy = {
+      async statusPorcelain(repoPath) {
+        if (repoPath.endsWith("blocked")) {
+          throw new Error("fatal: Unable to create '.git/index.lock': File exists");
+        }
+        return [
+          "# branch.head main",
+          "# branch.upstream origin/main",
+          "# branch.ab +0 -0",
+        ].join("\n");
+      },
+      async lastCommit() {
+        return "abcdef1|feat: healthy|2026-08-19T00:00:00.000Z";
+      },
+      async diffStat() {
+        return "";
+      },
+      async stashList() {
+        return "";
+      },
+      listLargeFiles,
+      async remoteHasBranch() {
+        return true;
+      },
+      async commitsToPushSubjects() {
+        return [];
+      },
+    };
+    const scanner = new RepoScanner(git, { exists: async () => true });
+
+    const snapshots = await scanner.scanAll({
+      version: 1,
+      root: "/workspace",
+      generatedAt: "2026-08-19T00:00:00.000Z",
+      targets: [
+        {
+          id: "blocked",
+          agent: null,
+          label: "Blocked",
+          path: "/workspace/blocked",
+          remote: "",
+          visibility: "local",
+          required: true,
+        },
+        {
+          id: "healthy",
+          agent: null,
+          label: "Healthy",
+          path: "/workspace/healthy",
+          remote: "",
+          visibility: "local",
+          required: true,
+        },
+      ],
+    });
+
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]).toMatchObject({
+      id: "blocked",
+      observationState: "unverified",
+      observationReasonCode: "REPO_SCAN_FAILED",
+      exists: true,
+    });
+    expect(snapshots[1]).toMatchObject({
+      id: "healthy",
+      observationState: "verified",
+      observationReasonCode: null,
+      exists: true,
+    });
+    expect(listLargeFiles).not.toHaveBeenCalled();
   });
 
   test("marks upstream null as missing upstream when origin branch exists", async () => {

@@ -1,44 +1,25 @@
-import { mkdtemp, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
-import { createGitControlService } from "../src/gitboard/gitControlService.js";
+import type { FinalizationService } from "../src/gitboard/finalizationService.js";
+import { createGitControlService, parseStashList } from "../src/gitboard/gitControlService.js";
 import type { GitProxy } from "../src/gitboard/gitProxy.js";
-import { MutationGitProxy } from "../src/gitboard/mutationGitProxy.js";
 import type { RepoManifest } from "../src/gitboard/types.js";
 
 const manifest: RepoManifest = {
-  version: 1,
+  version: 2,
   root: "/Users/tristanzh/agent",
-  generatedAt: "2026-06-19T00:00:00.000Z",
-  targets: [
-    {
-      id: "agent08-gitboard",
-      agent: "Agent08",
-      label: "Git Console",
-      path: "/Users/tristanzh/agent/agent08-gitboard",
-      remote: "https://github.com/tristanzh-dotcom/agent08-gitboard.git",
-      visibility: "public",
-      required: true,
-    },
-  ],
-};
-
-const agent11Manifest: RepoManifest = {
-  version: 1,
-  root: "/Users/tristanzh/agent",
-  generatedAt: "2026-07-16T00:00:00.000Z",
-  targets: [
-    {
-      id: "agent11-fishtank-monitor",
-      agent: "Agent11",
-      label: "Fishtank Monitor",
-      path: "/Users/tristanzh/agent/agent11-fishtank-monitor",
-      remote: "",
-      visibility: "local",
-      required: true,
-    },
-  ],
+  generatedAt: "2026-07-30T00:00:00.000Z",
+  targets: [{
+    id: "agent08-gitboard",
+    agent: "Agent08",
+    ownerId: "agent08",
+    kind: "governance",
+    lifecycle: "active",
+    label: "Git Console",
+    path: "/Users/tristanzh/agent/agent08-gitboard",
+    remote: "https://github.com/tristanzh-dotcom/agent08-gitboard.git",
+    visibility: "public",
+    required: true,
+  }],
 };
 
 const dirtyGit: GitProxy = {
@@ -48,17 +29,17 @@ const dirtyGit: GitProxy = {
       "# branch.head main",
       "# branch.upstream origin/main",
       "# branch.ab +1 -0",
-      "1 .M N... 100644 100644 100644 abcdef1234567890 abcdef1234567890 src/gitboard/gitControlService.ts",
+      "1 .M N... 100644 100644 100644 abcdef abcdef src/app.ts",
     ].join("\n");
   },
   async lastCommit() {
-    return "abcdef1|feat(gitboard): expose dashboard service|2026-06-18T15:00:00.000Z";
+    return "abcdef1|feat: current|2026-07-30T00:00:00.000Z";
   },
   async diffStat() {
-    return " src/gitboard/gitControlService.ts | 2 ++\n 1 file changed, 2 insertions(+)";
+    return " src/app.ts | 1 +";
   },
   async stashList() {
-    return "stash@{0}: WIP on main: abcdef1 feat(gitboard): expose dashboard service";
+    return "stash@{0}: WIP on main: abcdef1 local work";
   },
   async listLargeFiles() {
     return [];
@@ -67,424 +48,191 @@ const dirtyGit: GitProxy = {
     return true;
   },
   async commitsToPushSubjects() {
-    return ["feat(gitboard): expose dashboard service"];
+    return ["feat: current"];
   },
 };
 
-const noUpstreamGit: GitProxy = {
-  async statusPorcelain() {
-    return [
-      "# branch.oid abcdef1234567890",
-      "# branch.head main",
-    ].join("\n");
-  },
-  async lastCommit() {
-    return "abcdef1|feat(agent02): local commit|2026-06-19T15:00:00.000Z";
-  },
-  async diffStat() {
-    return "";
-  },
-  async stashList() {
-    return "";
-  },
-  async listLargeFiles() {
-    return [];
-  },
-  async remoteHasBranch() {
-    return false;
-  },
-  async commitsToPushSubjects() {
-    return ["feat(agent02): local commit"];
-  },
-};
-
-const unmergedGit: GitProxy = {
-  ...dirtyGit,
-  async statusPorcelain() {
-    return [
-      "# branch.oid abcdef1234567890",
-      "# branch.head main",
-      "# branch.upstream origin/main",
-      "# branch.ab +0 -0",
-      "1 M. N... 100644 100644 100644 abcdef1234567890 abcdef1234567890 workflows/foreign-jv-china-watch/src/agent02-adapter.mjs",
-      "u UU N... 100644 100644 100644 100644 base ours theirs workflows/foreign-jv-china-watch/data/latest_card_payload.json",
-    ].join("\n");
-  },
-};
-
-const nonGitDirectory: GitProxy = {
-  async statusPorcelain() {
-    throw new Error("fatal: not a git repository (or any of the parent directories): .git");
-  },
-  async lastCommit() {
-    return "";
-  },
-  async diffStat() {
-    return "";
-  },
-  async stashList() {
-    return "";
-  },
-  async listLargeFiles() {
-    return [];
-  },
-};
-
-describe("GitControlService", () => {
-  test("prepares and executes local-only Agent11 repository initialization", async () => {
-    const root = await mkdtemp(join(tmpdir(), "agent08-agent11-init-"));
-    const calls: string[][] = [];
+describe("GitControlService v1.4 facade", () => {
+  test("includes staged additions in the browser repository truth", async () => {
     const service = createGitControlService({
-      root,
-      git: nonGitDirectory,
-      manifest: agent11Manifest,
-      mutationProxy: new MutationGitProxy({
-        async runGit(_repoPath, args) {
-          calls.push(args);
-          return "Initialized empty Git repository";
-        },
-      }),
-      now: () => new Date("2026-07-16T00:00:00.000Z"),
-      nowMs: () => 1_000,
-    });
-
-    const prepared = await service.prepareMutation("agent11-fishtank-monitor", "init_repository");
-    const result = await service.mutate("agent11-fishtank-monitor", "init_repository", {
-      operationId: prepared.operationId,
-      preflightSnapshotId: prepared.preflightSnapshotId,
-      confirmationToken: prepared.confirmationToken,
-    });
-
-    expect(prepared).toMatchObject({
-      repoId: "agent11-fishtank-monitor",
-      operation: "init_repository",
-      warning: "This initializes a local Git repository only. It does not create a remote, push, or commit files.",
-    });
-    expect(result).toMatchObject({ ok: true, operation: "init_repository" });
-    expect(calls).toEqual([["init", "--initial-branch=main"]]);
-  });
-
-  test("returns dashboard scan data plus card-ready action models", async () => {
-    const service = createGitControlService({
-      git: dirtyGit,
       manifest,
-      now: () => new Date("2026-06-19T10:00:00.000Z"),
+      git: {
+        ...dirtyGit,
+        async statusPorcelain() {
+          return "# branch.head main\n1 A. N... 000000 100644 100644 000000 abcdef docs/new.md";
+        },
+      },
+      finalizationService: finalizationFixture(),
     });
 
     const scan = await service.scan();
 
-    expect(scan.dashboard.targets).toHaveLength(1);
-    expect(scan.cards).toEqual([
-      {
-        id: "agent08-gitboard",
-        label: "Git Console",
-        statusLine: "main ↑1",
-        dirtyLine: "1 dirty",
-        stashLine: "stash: 1",
-        blockedReason: null,
-        selfMutationWarning: "Running service code will not change until restart after a self mutation.",
-        actions: [
-          { id: "commit", enabled: true },
-          { id: "push", enabled: false },
-        ],
-      },
-    ]);
+    expect(scan.repositories[0].repoTruth).toMatchObject({
+      state: "dirty",
+      changeCount: 1,
+      changes: [{ path: "docs/new.md", status: "added" }],
+    });
   });
 
-  test("returns repo detail with parsed read-only stash metadata", async () => {
-    const service = createGitControlService({ git: dirtyGit, manifest });
+  test("returns one browser-safe canonical scan and detail projection", async () => {
+    const service = createGitControlService({
+      manifest,
+      git: dirtyGit,
+      finalizationService: finalizationFixture(),
+      now: () => new Date("2026-07-30T10:00:00.000Z"),
+    });
 
+    const scan = await service.scan();
     const detail = await service.repoDetail("agent08-gitboard");
 
-    expect(detail.snapshot.id).toBe("agent08-gitboard");
-    expect(detail.stashList).toEqual([
-      {
-        index: 0,
-        selector: "stash@{0}",
-        message: "abcdef1 feat(gitboard): expose dashboard service",
-        branch: "main",
-        createdAt: null,
+    expect(scan).toMatchObject({
+      schemaVersion: 2,
+      observation: {
+        state: "verified",
+        observedAt: "2026-07-30T10:00:00.000Z",
+        reasonCode: null,
       },
-    ]);
-  });
-
-  test("prepares mutations by storing a preflight snapshot and returning a bound token", async () => {
-    const root = await mkdtemp(join(tmpdir(), "agent08-git-control-"));
-    const service = createGitControlService({
-      root,
-      git: dirtyGit,
-      manifest,
-      now: () => new Date("2026-06-19T10:00:00.000Z"),
-      nowMs: () => 1_800,
-    });
-
-    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
-
-    expect(prepared).toMatchObject({
-      repoId: "agent08-gitboard",
-      operation: "commit",
-      preflightSnapshotId: prepared.operationId,
-      expiresAtMs: 61_800,
-    });
-    expect(prepared.confirmationToken).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-
-    const saved = JSON.parse(
-      await readFile(join(root, "storage", "mutations", `${prepared.operationId}.json`), "utf8"),
-    ) as Record<string, unknown>;
-    expect(saved).toMatchObject({
-      operationId: prepared.operationId,
-      repoId: "agent08-gitboard",
-      operation: "commit",
-      branch: "main",
-      ahead: 1,
-      behind: 0,
-      selfMutation: true,
-    });
-  });
-
-  test("blocks commit prepare when the repo has unmerged conflict files", async () => {
-    const service = createGitControlService({
-      git: unmergedGit,
-      manifest,
-      nowMs: () => 2_000,
-    });
-
-    await expect(service.prepareMutation("agent08-gitboard", "commit")).rejects.toMatchObject({
-      code: "UNMERGED_BLOCKS_COMMIT",
-    });
-  });
-
-  test("passes selected commit files through to the mutation proxy", async () => {
-    const calls: Array<{ repoPath: string; args: string[] }> = [];
-    const service = createGitControlService({
-      git: dirtyGit,
-      manifest,
-      mutationProxy: new MutationGitProxy({
-        async runGit(repoPath, args) {
-          calls.push({ repoPath, args });
-          return "ok";
+      repositories: [{
+        repoId: "agent08-gitboard",
+        label: "Git Console",
+        ownerId: "agent08",
+        kind: "governance",
+        lifecycle: "active",
+        availability: "git_repository",
+        repoTruth: {
+          state: "dirty",
+          changeCount: 1,
+          conflictCount: 0,
+          changes: [{ path: "src/app.ts", status: "modified" }],
         },
-      }),
-      nowMs: () => 2_000,
+        pushability: {
+          state: "pushable",
+          commitCount: 1,
+          ahead: 1,
+          behind: 0,
+          reasonCode: null,
+        },
+        actions: {
+          commit: { state: "enabled", reasonCode: null },
+          push: { state: "enabled", reasonCode: null },
+        },
+      }],
     });
-    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
-
-    await service.mutate("agent08-gitboard", "commit", {
-      operationId: prepared.operationId,
-      preflightSnapshotId: prepared.preflightSnapshotId,
-      confirmationToken: prepared.confirmationToken,
-      message: "test(agent08): selected files",
-      files: ["src/gitboard/gitControlService.ts"],
+    expect(scan).not.toHaveProperty("dashboard");
+    expect(scan).not.toHaveProperty("cards");
+    expect(detail).toEqual({
+      schemaVersion: 2,
+      repository: scan.repositories[0],
+      stashCount: 1,
     });
-
-    expect(calls[0]).toEqual({
-      repoPath: "/Users/tristanzh/agent/agent08-gitboard",
-      args: ["add", "--", "src/gitboard/gitControlService.ts"],
-    });
-    expect(calls[0]?.args).not.toContain(".");
+    const serialized = JSON.stringify({ scan, detail });
+    expect(serialized).not.toContain("/Users/tristanzh/agent");
+    expect(serialized).not.toContain("github.com");
+    expect(serialized).not.toContain("stash@{0}");
+    expect(serialized).not.toContain("local work");
   });
 
-  test("force-adds tracked dist runtime contract files through commit mutation", async () => {
-    const calls: string[][] = [];
-    const service = createGitControlService({
-      git: dirtyGit,
-      manifest,
-      mutationProxy: new MutationGitProxy({
-        async isTrackedFile(_repoPath, file) {
-          return file === "dist/gitboard/dashboardService.js";
-        },
-        async runGit(_repoPath, args) {
-          calls.push(args);
-          return "ok";
-        },
-      }),
-      nowMs: () => 2_100,
-    });
-    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
+  test("forwards source-aware commit and push finalization proposals", async () => {
+    const calls: unknown[] = [];
+    const finalization = finalizationFixture();
+    finalization.prepareCommit = async (repoId, proposal) => {
+      calls.push(["prepareCommit", repoId, proposal]);
+      return { operationId: "op-1" } as never;
+    };
+    finalization.preparePush = async (repoId, proposal) => {
+      calls.push(["preparePush", repoId, proposal]);
+      return { operationId: "op-2" } as never;
+    };
+    finalization.confirmFinalization = async (operationId) => {
+      calls.push(["confirm", operationId]);
+      return { operationId, confirmationToken: "token", expiresAt: "later" };
+    };
+    finalization.executeFinalization = async (operationId, token) => {
+      calls.push(["execute", operationId, token]);
+      return { operationId } as never;
+    };
+    const service = createGitControlService({ manifest, git: dirtyGit, finalizationService: finalization });
+    const commitProposal = {
+      selectedPaths: ["src/app.ts"],
+      commitMessage: "feat: selected",
+      source: "codex" as const,
+    };
+    const pushProposal = { expectedHead: "a".repeat(40), source: "manual" as const };
 
-    await service.mutate("agent08-gitboard", "commit", {
-      operationId: prepared.operationId,
-      preflightSnapshotId: prepared.preflightSnapshotId,
-      confirmationToken: prepared.confirmationToken,
-      message: "test(agent08): tracked dist",
-      files: ["src/gitboard/mutationGitProxy.ts", "dist/gitboard/dashboardService.js"],
-    });
+    await service.prepareCommit("agent08-gitboard", commitProposal);
+    await service.preparePush("agent08-gitboard", pushProposal);
+    await service.confirmFinalization("op-1");
+    await service.executeFinalization("op-1", "token");
 
     expect(calls).toEqual([
-      ["add", "--", "src/gitboard/mutationGitProxy.ts"],
-      ["add", "-f", "--", "dist/gitboard/dashboardService.js"],
-      ["commit", "-m", "test(agent08): tracked dist"],
+      ["prepareCommit", "agent08-gitboard", commitProposal],
+      ["preparePush", "agent08-gitboard", pushProposal],
+      ["confirm", "op-1"],
+      ["execute", "op-1", "token"],
     ]);
+    expect("prepareMutation" in service).toBe(false);
+    expect("mutate" in service).toBe(false);
   });
 
-  test("returns productized safety error for untracked dist commit files", async () => {
-    const calls: string[][] = [];
-    const service = createGitControlService({
-      git: dirtyGit,
-      manifest,
-      mutationProxy: new MutationGitProxy({
-        async isTrackedFile() {
-          return false;
-        },
-        async runGit(_repoPath, args) {
-          calls.push(args);
-          return "ok";
-        },
-      }),
-      nowMs: () => 2_200,
-    });
-    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
-
-    await expect(
-      service.mutate("agent08-gitboard", "commit", {
-        operationId: prepared.operationId,
-        preflightSnapshotId: prepared.preflightSnapshotId,
-        confirmationToken: prepared.confirmationToken,
-        message: "test(agent08): untracked dist",
-        files: ["dist/tmp/generated.js"],
-      }),
-    ).rejects.toMatchObject({ code: "COMMIT_PATH_BLOCKED" });
-
-    expect(calls).toEqual([]);
-  });
-
-  test("returns a compact one-line output summary after commit success", async () => {
-    const service = createGitControlService({
-      git: dirtyGit,
-      manifest,
-      mutationProxy: new MutationGitProxy({
-        async runGit(_repoPath, args) {
-          if (args[0] === "commit") {
-            return [
-              "[main abc1234] chore(agent07-sentinel): commit selected repo changes",
-              "2032 files changed, 1265664 insertions(+)",
-              "create mode 120000 node_modules/.bin/vite",
-            ].join("\n");
-          }
-          return "";
-        },
-      }),
-      nowMs: () => 2_500,
-    });
-    const prepared = await service.prepareMutation("agent08-gitboard", "commit");
-
-    const result = await service.mutate("agent08-gitboard", "commit", {
-      operationId: prepared.operationId,
-      preflightSnapshotId: prepared.preflightSnapshotId,
-      confirmationToken: prepared.confirmationToken,
-      message: "test(agent08): selected files",
-      files: ["src/gitboard/gitControlService.ts"],
-    });
-
-    expect(result.output).toContain("2032 files changed");
-    expect(result.outputSummary).toBe("[main abc1234] chore(agent07-sentinel): commit selected repo changes");
-    expect(result.outputSummary).not.toContain("\n");
-    expect(result.outputSummary.length).toBeLessThanOrEqual(160);
-  });
-
-  test("prepares set-upstream with branch, origin remote, and tracking branch details", async () => {
-    const service = createGitControlService({
-      git: {
-        ...noUpstreamGit,
-        async remoteHasBranch() {
-          return true;
-        },
-        async commitsToPushSubjects() {
-          return [];
-        },
+  test("keeps a failed repository detail unverified without a second stash read", async () => {
+    let stashReads = 0;
+    const failingGit: GitProxy = {
+      ...dirtyGit,
+      async statusPorcelain() {
+        throw new Error("fatal: index.lock prevents reading status");
       },
-      manifest,
-      nowMs: () => 3_000,
-    });
-
-    const prepared = await service.prepareMutation("agent08-gitboard", "set_upstream");
-
-    expect(prepared).toMatchObject({
-      repoId: "agent08-gitboard",
-      operation: "set_upstream",
-      branch: "main",
-      remote: "origin",
-      remoteTrackingBranch: "origin/main",
-      currentUpstream: null,
-      warning: "This operation updates local Git tracking config and does not push commits.",
-    });
-  });
-
-  test("executes set-upstream using snapshot branch instead of request body branch", async () => {
-    const calls: string[][] = [];
-    const service = createGitControlService({
-      git: {
-        ...noUpstreamGit,
-        async remoteHasBranch() {
-          return true;
-        },
-        async commitsToPushSubjects() {
-          return [];
-        },
+      async stashList() {
+        stashReads += 1;
+        if (stashReads > 1) throw new Error("detail repeated the failed repository read");
+        return "";
       },
+    };
+    const service = createGitControlService({
       manifest,
-      mutationProxy: new MutationGitProxy({
-        async runGit(_repoPath, args) {
-          calls.push(args);
-          return "ok";
-        },
-      }),
-      nowMs: () => 4_000,
+      git: failingGit,
+      finalizationService: finalizationFixture(),
+      now: () => new Date("2026-07-30T10:00:00.000Z"),
     });
-    const prepared = await service.prepareMutation("agent08-gitboard", "set_upstream");
 
-    await service.mutate("agent08-gitboard", "set_upstream", {
-      operationId: prepared.operationId,
-      preflightSnapshotId: prepared.preflightSnapshotId,
-      confirmationToken: prepared.confirmationToken,
-      branch: "main --force" } as any);
-
-    expect(calls).toEqual([["branch", "--set-upstream-to", "origin/main", "main"]]);
+    await expect(service.repoDetail("agent08-gitboard")).resolves.toMatchObject({
+      schemaVersion: 2,
+      repository: {
+        observation: { state: "unverified", reasonCode: "REPO_SCAN_FAILED" },
+        repoTruth: { state: "unknown", changes: [] },
+        pushability: { state: "unknown" },
+      },
+      stashCount: 0,
+    });
+    expect(stashReads).toBe(1);
   });
 
-  test("prepares push-with-upstream with commit preview and explicit warning", async () => {
-    const service = createGitControlService({
-      git: noUpstreamGit,
-      manifest,
-      nowMs: () => 5_000,
-    });
-
-    const prepared = await service.prepareMutation("agent08-gitboard", "push_with_upstream");
-
-    expect(prepared).toMatchObject({
-      repoId: "agent08-gitboard",
-      operation: "push_with_upstream",
-      branch: "main",
-      remote: "origin",
-      ahead: 1,
-      commitsToPushSubjects: ["feat(agent02): local commit"],
-      warning: "This operation pushes to origin AND sets upstream tracking.",
-    });
-  });
-
-  test("executes push-with-upstream using typed proxy and snapshot branch", async () => {
-    const calls: string[][] = [];
-    const service = createGitControlService({
-      git: noUpstreamGit,
-      manifest,
-      mutationProxy: new MutationGitProxy({
-        async runGit(_repoPath, args) {
-          calls.push(args);
-          return "ok";
-        },
-      }),
-      nowMs: () => 6_000,
-    });
-    const prepared = await service.prepareMutation("agent08-gitboard", "push_with_upstream");
-
-    await service.mutate("agent08-gitboard", "push_with_upstream", {
-      operationId: prepared.operationId,
-      preflightSnapshotId: prepared.preflightSnapshotId,
-      confirmationToken: prepared.confirmationToken,
-      remote: "evil" } as any);
-
-    expect(calls).toEqual([["push", "-u", "origin", "main"]]);
+  test("parses read-only stash metadata without making it a controlled mutation", () => {
+    expect(parseStashList("stash@{2}: On feature: local checkpoint")).toEqual([{
+      index: 2,
+      selector: "stash@{2}",
+      message: "On feature: local checkpoint",
+      branch: null,
+      createdAt: null,
+    }]);
   });
 });
+
+function finalizationFixture(): FinalizationService {
+  return {
+    async prepareCommit() {
+      return {} as never;
+    },
+    async preparePush() {
+      return {} as never;
+    },
+    async confirmFinalization() {
+      return {} as never;
+    },
+    async executeFinalization() {
+      return {} as never;
+    },
+    async finalizationStatus() {
+      return {} as never;
+    },
+  };
+}
