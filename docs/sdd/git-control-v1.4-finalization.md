@@ -65,6 +65,17 @@ history rewrite are outside the Agent08 v1.4 product API.
 
 ## 4. Commit contract
 
+### Initial commit clarification (2026-10-05)
+
+TZ requested that the registered `HomeViewBJ` repository can prepare its first
+commit through the existing Agent08 confirmation flow. For a named branch with
+no commit, the immutable commit plan records `expectedHead: null`. Preparation
+and execution still verify canonical repository identity, branch, exact selected
+paths, selected content, blocked output, and secret signatures. Execution must
+fail if a HEAD appears before the confirmed operation runs. Postflight verifies
+that the new commit has no parent and contains exactly the selected paths. This
+clarification does not authorize a remote or a push for the local-only repository.
+
 Codex submits:
 
 ```ts
@@ -206,4 +217,3 @@ Automated acceptance must prove:
 8. non-commit/push mutation routes are unavailable;
 9. result receipts distinguish success and failure without secrets;
 10. production service contains no Phase C worktree dependency.
-

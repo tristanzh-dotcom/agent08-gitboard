@@ -27,14 +27,14 @@ const fakeGit: GitProxy = {
 };
 
 describe("RepoScanner M1 multi-repo dashboard scan", () => {
-  test("scans all 16 manifest targets including Agent11, Agent12, Agent13, Agent14, and home-platform projects", async () => {
+  test("scans all 17 manifest targets including Agent11 through Agent15 and home-platform projects", async () => {
     const manifest = createDefaultManifest("/Users/tristanzh/agent");
     const scanner = new RepoScanner(fakeGit);
 
     const snapshots = await scanner.scanAll(manifest);
 
     expect(manifest.version).toBe(2);
-    expect(snapshots).toHaveLength(16);
+    expect(snapshots).toHaveLength(17);
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent08-gitboard");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent10-asset-library");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent11-fishtank-monitor");
@@ -43,6 +43,7 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent13-esp-reminder");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("home-platform");
     expect(snapshots.map((snapshot) => snapshot.id)).toContain("agent14-ppt2html");
+    expect(snapshots.map((snapshot) => snapshot.id)).toContain("homeview-bj");
     expect(manifest.targets).toContainEqual(
       expect.objectContaining({
         id: "agent11-fishtank-monitor",
@@ -111,6 +112,19 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
         path: "/Users/tristanzh/agent/agent14-ppt2html",
         remote: "https://github.com/tristanzh-dotcom/agent14-ppt2html.git",
         visibility: "private",
+      }),
+    );
+    expect(manifest.targets).toContainEqual(
+      expect.objectContaining({
+        id: "homeview-bj",
+        agent: "Agent15",
+        ownerId: "agent15",
+        kind: "business",
+        lifecycle: "active",
+        label: "数字住宅",
+        path: "/Users/tristanzh/agent/HomeViewBJ",
+        remote: "",
+        visibility: "local",
       }),
     );
     expect(snapshots[0]).toMatchObject({

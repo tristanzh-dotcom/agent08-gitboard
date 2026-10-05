@@ -47,7 +47,7 @@ interface BaseFinalizationPlan {
   repoId: string;
   canonicalRepoPath: string;
   branch: string;
-  expectedHead: string;
+  expectedHead: string | null;
   proposalSource: ProposalSource;
   taskIntentId?: string | null;
   planDigest: string;
@@ -66,6 +66,7 @@ export interface CommitPlan extends BaseFinalizationPlan {
 
 export interface PushPlan extends BaseFinalizationPlan {
   operation: "push";
+  expectedHead: string;
   remote: "origin";
   remoteUrl: string;
   remoteRef: string;
@@ -135,7 +136,7 @@ interface PublicBaseFinalizationPlan {
   operation: FinalizationOperation;
   repoId: string;
   branch: string;
-  expectedHead: string;
+  expectedHead: string | null;
   proposalSource: ProposalSource;
   taskIntentId: string | null;
   createdAt: string;
@@ -152,6 +153,7 @@ export interface PublicCommitPlan extends PublicBaseFinalizationPlan {
 
 export interface PublicPushPlan extends PublicBaseFinalizationPlan {
   operation: "push";
+  expectedHead: string;
 }
 
 export type PublicFinalizationPlan = PublicCommitPlan | PublicPushPlan;

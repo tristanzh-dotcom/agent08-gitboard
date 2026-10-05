@@ -189,6 +189,18 @@ export function createDefaultManifest(root: string): RepoManifest {
         required: true
       },
       {
+        id: "homeview-bj",
+        agent: "Agent15",
+        ownerId: "agent15",
+        kind: "business",
+        lifecycle: "active",
+        label: "数字住宅",
+        path: `${base}/HomeViewBJ`,
+        remote: "",
+        visibility: "local",
+        required: true
+      },
+      {
         id: "web-platform",
         agent: null,
         ownerId: "agent00",

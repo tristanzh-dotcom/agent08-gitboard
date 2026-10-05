@@ -312,7 +312,7 @@ function publicFinalizationPlan(plan: FinalizationPlan): PublicFinalizationPlan 
     createdAt: plan.createdAt,
     expiresAt: plan.expiresAt,
   };
-  if (plan.operation === "push") return { operation: "push", ...display };
+  if (plan.operation === "push") return { operation: "push", ...display, expectedHead: plan.expectedHead };
   return {
     operation: "commit",
     ...display,

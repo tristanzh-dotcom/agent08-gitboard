@@ -55,6 +55,24 @@ const pushInspection: PushInspection = {
 };
 
 describe("FinalizationService", () => {
+  test("keeps an initial commit bound to the unborn branch through confirmation", async () => {
+    const unborn = { ...commitInspection, head: null };
+    const fixture = await createFixture({ commitInspections: [unborn, unborn] });
+    const prepared = await fixture.service.prepareCommit("agent08-gitboard", {
+      selectedPaths: unborn.selectedPaths,
+      commitMessage: "feat: initial selected file",
+    });
+
+    expect(prepared.expectedHead).toBeNull();
+    expect((await fixture.store.status(prepared.operationId)).plan?.expectedHead).toBeNull();
+    expect(fixture.commitCalls).toHaveLength(0);
+
+    const confirmation = await fixture.service.confirmFinalization(prepared.operationId);
+    const receipt = await fixture.service.executeFinalization(prepared.operationId, confirmation.confirmationToken);
+    expect(receipt).toMatchObject({ resultCode: "COMMITTED", beforeOid: null, afterOid: nextHead });
+    expect(fixture.commitCalls[0]?.expectedHead).toBeNull();
+  });
+
   test("prepares an immutable Codex commit proposal without creating confirmation", async () => {
     const fixture = await createFixture();
 

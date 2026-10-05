@@ -34,7 +34,7 @@ export interface FinalizationGitRunner {
 export interface CommitInspection {
   canonicalRepoPath: string;
   branch: string;
-  head: string;
+  head: string | null;
   selectedPaths: string[];
   changedPaths: string[];
   selectedStateDigest: string;
@@ -42,7 +42,7 @@ export interface CommitInspection {
 
 export interface CommitExecutionInput {
   branch: string;
-  expectedHead: string;
+  expectedHead: string | null;
   selectedPaths: string[];
   selectedStateDigest: string;
   commitMessage: string;
@@ -50,7 +50,7 @@ export interface CommitExecutionInput {
 
 export interface CommitExecutionResult {
   commitOid: string;
-  parentOid: string;
+  parentOid: string | null;
   committedPaths: string[];
   outputSummary: string;
 }
@@ -126,7 +126,7 @@ export class FinalizationGit {
       "--raw",
       "-z",
       "--no-ext-diff",
-      "HEAD",
+      ...(repository.head === null ? ["--cached"] : ["HEAD"]),
       "--",
       ...selectedPaths,
     ]);
@@ -190,13 +190,22 @@ export class FinalizationGit {
         await this.runner.run(repository.canonicalRepoPath, ["rev-parse", "--verify", "HEAD"]),
         "FINALIZATION_COMMIT_OID_INVALID",
       );
-      const parentOid = requireOid(
+      const parentOid = repository.head === null ? null : requireOid(
         await this.runner.run(repository.canonicalRepoPath, ["rev-parse", "--verify", "HEAD^"]),
         "FINALIZATION_COMMIT_PARENT_INVALID",
       );
+      if (repository.head === null) {
+        const commitAndParents = (await this.runner.run(repository.canonicalRepoPath, [
+          "rev-list", "--parents", "-n", "1", "HEAD",
+        ])).trim().split(/\s+/);
+        if (commitAndParents.length !== 1 || commitAndParents[0] !== commitOid) {
+          throw new FinalizationError("FINALIZATION_COMMIT_PARENT_DRIFT");
+        }
+      }
       const committedPaths = parseNullList(
         await this.runner.run(repository.canonicalRepoPath, [
           "diff-tree",
+          ...(repository.head === null ? ["--root"] : []),
           "--no-commit-id",
           "--name-only",
           "-r",
@@ -233,6 +242,8 @@ export class FinalizationGit {
       throw new FinalizationError("FINALIZATION_MANIFEST_REMOTE_INVALID");
     }
     const repository = await this.inspectLocalRepository(repoPath);
+    if (repository.head === null) throw new FinalizationError("FINALIZATION_HEAD_INVALID");
+    const head = repository.head;
     const remoteUrl = (
       await this.runner.run(repository.canonicalRepoPath, ["remote", "get-url", "origin"])
     ).trim();
@@ -265,6 +276,7 @@ export class FinalizationGit {
     const remoteOid = parseRemoteOid(remoteOutput, remoteRef);
     return {
       ...repository,
+      head,
       remote: "origin",
       remoteUrl,
       remoteRef,
@@ -330,7 +342,7 @@ export class FinalizationGit {
   private async inspectLocalRepository(repoPath: string): Promise<{
     canonicalRepoPath: string;
     branch: string;
-    head: string;
+    head: string | null;
   }> {
     const canonicalRepoPath = await realpath(repoPath);
     const reportedTopLevel = (
@@ -349,10 +361,22 @@ export class FinalizationGit {
       throw new FinalizationError("FINALIZATION_DETACHED_HEAD");
     }
     assertSafeBranch(branch);
-    const head = requireOid(
-      await this.runner.run(canonicalRepoPath, ["rev-parse", "--verify", "HEAD"]),
-      "FINALIZATION_HEAD_INVALID",
-    );
+    let head: string | null;
+    try {
+      head = requireOid(
+        await this.runner.run(canonicalRepoPath, ["rev-parse", "--verify", "HEAD"]),
+        "FINALIZATION_HEAD_INVALID",
+      );
+    } catch (error) {
+      if (!hasExitCode(error, 128)) throw error;
+      try {
+        await this.runner.run(canonicalRepoPath, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+        throw new FinalizationError("FINALIZATION_HEAD_INVALID");
+      } catch (quietError) {
+        if (!hasExitCode(quietError, 1)) throw quietError;
+      }
+      head = null;
+    }
     return { canonicalRepoPath, branch, head };
   }
 
@@ -536,6 +560,10 @@ function requireOid(output: string, code: string): string {
   const oid = output.trim();
   if (!FULL_OID.test(oid)) throw new FinalizationError(code);
   return oid;
+}
+
+function hasExitCode(error: unknown, code: number): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 function assertSafeBranch(branch: string): void {

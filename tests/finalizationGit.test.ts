@@ -15,6 +15,51 @@ import {
 const execFileAsync = promisify(execFile);
 
 describe("FinalizationGit", () => {
+  test("prepares and verifies an initial commit without including unrelated staged files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agent08-finalization-initial-"));
+    await git(root, ["init", "--initial-branch=main"]);
+    await git(root, ["config", "user.name", "Agent08 Test"]);
+    await git(root, ["config", "user.email", "agent08-test@example.invalid"]);
+    await writeFile(join(root, "selected.txt"), "selected content\n", "utf8");
+    await writeFile(join(root, "unrelated.txt"), "unrelated content\n", "utf8");
+    await git(root, ["add", "--", "unrelated.txt"]);
+
+    const finalizationGit = new FinalizationGit(new RealFinalizationGitRunner());
+    const inspection = await finalizationGit.inspectCommit(root, ["selected.txt"]);
+    expect(inspection.head).toBeNull();
+
+    const result = await finalizationGit.commitSelected(root, {
+      branch: inspection.branch,
+      expectedHead: null,
+      selectedPaths: inspection.selectedPaths,
+      selectedStateDigest: inspection.selectedStateDigest,
+      commitMessage: "feat: initial selected file",
+    });
+
+    expect(result.parentOid).toBeNull();
+    expect(result.committedPaths).toEqual(["selected.txt"]);
+    expect((await git(root, ["diff", "--cached", "--name-only"])).trim()).toBe("unrelated.txt");
+    expect((await git(root, ["rev-list", "--parents", "-n", "1", "HEAD"])).trim()).toBe(result.commitOid);
+  });
+
+  test("rejects an initial commit when a selected file changes after inspection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agent08-finalization-initial-drift-"));
+    await git(root, ["init", "--initial-branch=main"]);
+    await writeFile(join(root, "selected.txt"), "approved\n", "utf8");
+    const finalizationGit = new FinalizationGit(new RealFinalizationGitRunner());
+    const inspection = await finalizationGit.inspectCommit(root, ["selected.txt"]);
+    await writeFile(join(root, "selected.txt"), "changed\n", "utf8");
+
+    await expect(finalizationGit.commitSelected(root, {
+      branch: inspection.branch,
+      expectedHead: null,
+      selectedPaths: inspection.selectedPaths,
+      selectedStateDigest: inspection.selectedStateDigest,
+      commitMessage: "feat: initial selected file",
+    })).rejects.toMatchObject({ code: "FINALIZATION_SELECTED_STATE_DRIFT" });
+    await expect(git(root, ["rev-parse", "--verify", "HEAD"])).rejects.toThrow();
+  });
+
   test("inspects exact changed paths and creates a stable selected-state digest", async () => {
     const root = await mkdtemp(join(tmpdir(), "agent08-finalization-inspect-"));
     await writeFile(join(root, "safe.ts"), "export const value = 2;\n", "utf8");
