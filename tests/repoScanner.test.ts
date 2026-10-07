@@ -122,7 +122,7 @@ describe("RepoScanner M1 multi-repo dashboard scan", () => {
         kind: "business",
         lifecycle: "active",
         label: "数字住宅",
-        path: "/Users/tristanzh/agent/HomeViewBJ",
+        path: "/Users/tristanzh/agent/HomeView",
         remote: "",
         visibility: "local",
       }),

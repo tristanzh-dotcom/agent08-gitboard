@@ -192,7 +192,7 @@ export function createDefaultManifest(root) {
                 kind: "business",
                 lifecycle: "active",
                 label: "数字住宅",
-                path: `${base}/HomeViewBJ`,
+                path: `${base}/HomeView`,
                 remote: "",
                 visibility: "local",
                 required: true
