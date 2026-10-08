@@ -52,6 +52,21 @@ Agent08 does not decide whether application behavior is correct.
 
 ## 3. Operations
 
+### Digital Home repository scope (2026-10-08)
+
+TZ approved implementation of one Digital Home group with three independently
+controlled local repositories: shared application code at `HomeView`, Beijing
+source material at `AgentAssetVault/00_Inbox/HomeViewBJ`, and Shanghai source
+material at `AgentAssetVault/00_Inbox/HomeViewSH`, relative to the workspace root.
+All three use owner `agent15`; the application retains legacy repository ID
+`homeview-bj`, while the source repositories use `homeview-bj-data` and
+`homeview-sh-data`. The two source repositories are initialized locally on
+`main`, preserving original files and their locations. No remote, initial commit,
+or upload is included in this registration. Each commit plan and confirmation
+continues to bind one canonical repository and its exact selected paths. The Web
+group aggregates status only; it cannot create a combined commit or publish
+raw source attachments as application assets.
+
 Only these state-changing product operations are exposed:
 
 ```text

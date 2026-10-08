@@ -191,8 +191,32 @@ export function createDefaultManifest(root) {
                 ownerId: "agent15",
                 kind: "business",
                 lifecycle: "active",
-                label: "数字住宅",
+                label: "共用代码 · HomeView",
                 path: `${base}/HomeView`,
+                remote: "",
+                visibility: "local",
+                required: true
+            },
+            {
+                id: "homeview-bj-data",
+                agent: "Agent15",
+                ownerId: "agent15",
+                kind: "business",
+                lifecycle: "active",
+                label: "北京资料 · HomeViewBJ",
+                path: `${base}/AgentAssetVault/00_Inbox/HomeViewBJ`,
+                remote: "",
+                visibility: "local",
+                required: true
+            },
+            {
+                id: "homeview-sh-data",
+                agent: "Agent15",
+                ownerId: "agent15",
+                kind: "business",
+                lifecycle: "active",
+                label: "上海资料 · HomeViewSH",
+                path: `${base}/AgentAssetVault/00_Inbox/HomeViewSH`,
                 remote: "",
                 visibility: "local",
                 required: true
