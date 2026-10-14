@@ -4,7 +4,7 @@ import { lstat, readdir, readFile, readlink, realpath } from "node:fs/promises";
 import { isAbsolute, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { FinalizationError } from "./finalizationContracts.js";
-import { canonicalJson } from "./machineOperationContracts.js";
+import { canonicalJson } from "./storageUtils.js";
 
 const execFileAsync = promisify(execFile);
 

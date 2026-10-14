@@ -12,7 +12,7 @@ import {
 } from "./finalizationContracts.js";
 import { FinalizationGit } from "./finalizationGit.js";
 import { FinalizationPlanStore } from "./finalizationPlanStore.js";
-import { canonicalJson } from "./machineOperationContracts.js";
+import { canonicalJson } from "./storageUtils.js";
 import type { RepoManifest, RepoManifestEntry } from "./types.js";
 
 const PLAN_TTL_MS = 5 * 60_000;
