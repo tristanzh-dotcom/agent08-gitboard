@@ -263,7 +263,7 @@ describe("git control HTTP server", () => {
     ]);
   });
 
-  test("does not expose legacy development mutation routes", async () => {
+  test("does not expose legacy development mutation or backend repair routes", async () => {
     const service = serviceFixture();
     for (const path of [
       "/api/git-control/repos/agent02-pvi/commit",
@@ -271,36 +271,11 @@ describe("git control HTTP server", () => {
       "/api/git-control/repos/agent02-pvi/set-upstream/prepare",
       "/api/git-control/repos/agent02-pvi/bootstrap-push",
       "/api/git-control/repos/agent02-pvi/init/prepare",
+      "/api/git-control/backend/agent04/start",
+      "/api/git-control/backend/agent06/restart",
     ]) {
       await expectJson(service, "POST", path, 404, { error: { code: "NOT_FOUND" } }, {});
     }
-  });
-
-  test("routes the existing backend repair boundary independently", async () => {
-    const calls: string[] = [];
-    const service = serviceFixture();
-    service.backendStart = async (agentId) => {
-      calls.push(`start:${agentId}`);
-      return { agentId, status: "started", pid: 4204, port: 8004 };
-    };
-    service.backendRestart = async (agentId) => {
-      calls.push(`restart:${agentId}`);
-      return { agentId, status: "restarted", pid: 4206, port: 8086 };
-    };
-
-    await expectJson(service, "POST", "/api/git-control/backend/agent04/start", 200, {
-      ok: true,
-      agentId: "agent04",
-      action: "start",
-      process: { agentId: "agent04", status: "started", pid: 4204, port: 8004 },
-    });
-    await expectJson(service, "POST", "/api/git-control/backend/agent06/restart", 200, {
-      ok: true,
-      agentId: "agent06",
-      action: "restart",
-      process: { agentId: "agent06", status: "restarted", pid: 4206, port: 8086 },
-    });
-    expect(calls).toEqual(["start:agent04", "restart:agent06"]);
   });
 
   test("productizes finalization errors without leaking raw content", async () => {
