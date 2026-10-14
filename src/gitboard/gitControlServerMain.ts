@@ -1,6 +1,4 @@
 import { createGitControlHttpServer } from "./gitControlHttpServer.js";
-import type { GitControlHttpService } from "./gitControlHttpServer.js";
-import { BackendProcessManager, createDefaultBackendProcessRegistry } from "./backendProcessManager.js";
 import { gitControlService } from "./gitControlService.js";
 
 export interface GitControlListenConfig {
@@ -15,30 +13,8 @@ export function resolveGitControlListenConfig(env: Record<string, string | undef
   };
 }
 
-export function createGitControlHttpServiceWithBackendManager({
-  baseService,
-  backendManager,
-}: {
-  baseService: GitControlHttpService;
-  backendManager: Pick<BackendProcessManager, "start" | "restart">;
-}): GitControlHttpService {
-  return {
-    ...baseService,
-    backendStart: (agentId) => backendManager.start(agentId),
-    backendRestart: (agentId) => backendManager.restart(agentId),
-  };
-}
-
 export function startGitControlServer(config = resolveGitControlListenConfig(process.env)): void {
-  const backendManager = new BackendProcessManager({
-    specs: createDefaultBackendProcessRegistry("/Users/tristanzh/agent"),
-    stateDir: process.env.AGENT08_BACKEND_STATE_DIR ?? "/tmp/agent08-backends",
-  });
-  const service = createGitControlHttpServiceWithBackendManager({
-    baseService: gitControlService,
-    backendManager,
-  });
-  const server = createGitControlHttpServer({ service });
+  const server = createGitControlHttpServer({ service: gitControlService });
   server.listen(config.port, config.host, () => {
     console.log(`agent08-git-control listening on http://${config.host}:${config.port}`);
   });

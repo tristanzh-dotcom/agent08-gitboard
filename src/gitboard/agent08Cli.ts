@@ -1,16 +1,4 @@
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
-import { BackendProcessManager, createDefaultBackendProcessRegistry, type BackendProcessResult } from "./backendProcessManager.js";
-
-export interface Agent08CliBackendManager {
-  start(agentId: string): Promise<BackendProcessResult>;
-  stop(agentId: string): Promise<BackendProcessResult>;
-  restart(agentId: string): Promise<BackendProcessResult>;
-}
-
-export interface Agent08CliOptions {
-  manager?: Agent08CliBackendManager;
-}
 
 export interface Agent08CliResult {
   exitCode: number;
@@ -19,30 +7,20 @@ export interface Agent08CliResult {
 
 const USAGE = "Usage: agent08 backend start|stop|restart <agent-id>";
 
-export async function dispatchAgent08Cli(args: string[], options: Agent08CliOptions = {}): Promise<Agent08CliResult> {
+export async function dispatchAgent08Cli(args: string[]): Promise<Agent08CliResult> {
   const [domain, action, agentId] = args;
-  if (domain !== "backend" || !agentId || !["start", "stop", "restart"].includes(action ?? "")) {
-    return usageError();
-  }
-
-  const manager = options.manager ?? createDefaultBackendManager();
-  try {
-    const body = await manager[action as "start" | "stop" | "restart"](agentId);
-    return { exitCode: 0, body };
-  } catch (error) {
+  if (domain === "backend" && agentId && ["start", "stop", "restart"].includes(action ?? "")) {
     return {
       exitCode: 1,
       body: {
         error: {
-          code: "AGENT08_BACKEND_COMMAND_FAILED",
-          summary: error instanceof Error ? error.message : String(error),
+          code: "AGENT08_BACKEND_DEPRECATED",
+          summary: "Agent08 backend process manager has been unified into Web platform supervisor.",
+          suggestedAction: "Manage services via Web UI or direct agent repository scripts.",
         },
       },
     };
   }
-}
-
-function usageError(): Agent08CliResult {
   return {
     exitCode: 2,
     body: {
@@ -52,13 +30,6 @@ function usageError(): Agent08CliResult {
       },
     },
   };
-}
-
-function createDefaultBackendManager(): BackendProcessManager {
-  return new BackendProcessManager({
-    specs: createDefaultBackendProcessRegistry("/Users/tristanzh/agent"),
-    stateDir: process.env.AGENT08_BACKEND_STATE_DIR ?? join("/Users/tristanzh/agent/agent08-gitboard", "storage", "backends"),
-  });
 }
 
 async function main(): Promise<void> {
